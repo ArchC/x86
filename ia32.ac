@@ -1,0 +1,34 @@
+// Assumpmitions:
+//
+// Memory is treated as processor internal as of  this  functional  model.  And  no
+// caching is emulated.
+//
+// No segment register override is implemented yet.
+
+AC_ARCH(IA32)
+{
+	// IA32 Family word is 16bit-wide, but registers are 32bits in this model
+	ac_wordsize 32;
+
+	// Memory is internal in this functional model
+	ac_mem MEM:32M;
+
+	// General purpose registers (32bit registers) :
+	// EAX, ECX, EDX, EBX, ESP, EBP, ESI, EDI
+	ac_regbank GR:8;
+
+	// Segment registers (segment registers are 16bit-wide):
+	// CS, DS, SS, ES, FS, GS
+	ac_regbank SR:6;
+
+	// Special registers (32bit registers) :
+	// EFLAGS, EIP
+	ac_regbank SPR:2;
+
+	ARCH_CTOR(IA32)
+	{
+		set_endian("little");
+		ac_isa("ia32_isa.ac");
+	};
+};
+
