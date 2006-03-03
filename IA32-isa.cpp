@@ -25,6 +25,16 @@
  *                                                    *
  ******************************************************/
 
+
+//Rafael Madeira
+/******************************
+24/02/06
+Continuar implementação das rotinas
+auxiliares para flags
+
+******************************/
+
+
 #include  "IA32-isa.H"
 #include  "ac_isa_init.cpp"
 #include <math.h>
@@ -124,96 +134,96 @@ int AddressSize;
 // Used to print instructions in generic format (ex."mov rm32, r32")
 void acprintfg ( char *s )
 {
-	if (GENERICVERBOSE && !VERBOSE) fprintf(OUTSTREAM, "%s\n", s);
-	else if (GENERICVERBOSE && VERBOSE) fprintf(OUTSTREAM, "%s\t\t", s);
+  if (GENERICVERBOSE && !VERBOSE) fprintf(OUTSTREAM, "%s\n", s);
+  else if (GENERICVERBOSE && VERBOSE) fprintf(OUTSTREAM, "%s\t\t", s);
 }
 
 // Used to print information
 void acprintf ( char *s )
 {
-	if (VERBOSE) fprintf(OUTSTREAM, s);
+  if (VERBOSE) fprintf(OUTSTREAM, s);
 }
 
 // Used to print immediate data
 void acprinti ( uint d )
 {
-	if (VERBOSE) fprintf(OUTSTREAM, "0x%08X", d);
+  if (VERBOSE) fprintf(OUTSTREAM, "0x%08X", d);
 }
 
 void acprintfrr ( char *inst, uint reg1, uint reg2 )
 {
-	if (VERBOSE && (OperandSize==OPERAND_SIZE16))
-		fprintf(OUTSTREAM, "%s %s, %s\n", inst, reg_str16[reg1], reg_str16[reg2] );
-	else if (VERBOSE && (OperandSize==OPERAND_SIZE32))
-		fprintf(OUTSTREAM, "%s %s, %s\n", inst, reg_str[reg1], reg_str[reg2] );
+  if (VERBOSE && (OperandSize==OPERAND_SIZE16))
+    fprintf(OUTSTREAM, "%s %s, %s\n", inst, reg_str16[reg1], reg_str16[reg2] );
+  else if (VERBOSE && (OperandSize==OPERAND_SIZE32))
+    fprintf(OUTSTREAM, "%s %s, %s\n", inst, reg_str[reg1], reg_str[reg2] );
 }
 
 void acprintfmr ( char *inst, uint a, uint reg )
 {
-	if (VERBOSE && (OperandSize==OPERAND_SIZE16))
-		fprintf(OUTSTREAM, "%s [0x%08X], %s\n", inst, a, reg_str16[reg] );
-	else if (VERBOSE && (OperandSize==OPERAND_SIZE32))
-		fprintf(OUTSTREAM, "%s [0x%08X], %s\n", inst, a, reg_str[reg] );
+  if (VERBOSE && (OperandSize==OPERAND_SIZE16))
+    fprintf(OUTSTREAM, "%s [0x%08X], %s\n", inst, a, reg_str16[reg] );
+  else if (VERBOSE && (OperandSize==OPERAND_SIZE32))
+    fprintf(OUTSTREAM, "%s [0x%08X], %s\n", inst, a, reg_str[reg] );
 }
 
 void acprintfrm ( char *inst, uint reg, uint a )
 {
-	if (VERBOSE && (OperandSize==OPERAND_SIZE16))
-		fprintf(OUTSTREAM, "%s %s, [0x%08X]\n", inst, reg_str16[reg], a );
-	else if (VERBOSE && (OperandSize==OPERAND_SIZE32))
-		fprintf(OUTSTREAM, "%s %s, [0x%08X]\n", inst, reg_str[reg], a );
+  if (VERBOSE && (OperandSize==OPERAND_SIZE16))
+    fprintf(OUTSTREAM, "%s %s, [0x%08X]\n", inst, reg_str16[reg], a );
+  else if (VERBOSE && (OperandSize==OPERAND_SIZE32))
+    fprintf(OUTSTREAM, "%s %s, [0x%08X]\n", inst, reg_str[reg], a );
 }
 
 void acprintfi16 ( char *inst, ushort i )
 {
-	if (VERBOSE) fprintf(OUTSTREAM, "%s 0x%04X\n", inst, i);
+  if (VERBOSE) fprintf(OUTSTREAM, "%s 0x%04X\n", inst, i);
 }
 
 void acprintfi32 ( char *inst, uint i )
 {
-	if (VERBOSE) fprintf(OUTSTREAM, "%s 0x%08X\n", inst, i);
+  if (VERBOSE) fprintf(OUTSTREAM, "%s 0x%08X\n", inst, i);
 }
 
 void acprintfri16 ( char *inst, uint reg, ushort i )
 {
-	if (VERBOSE) fprintf(OUTSTREAM, "%s %s, 0x%04X\n", inst, reg_str16[reg], i);
+  if (VERBOSE) fprintf(OUTSTREAM, "%s %s, 0x%04X\n", inst, reg_str16[reg], i);
 }
 
 void acprintfri32 ( char *inst, uint reg, uint i )
 {
-	if (VERBOSE) fprintf(OUTSTREAM, "%s %s, 0x%08X\n", inst, reg_str[reg], i );
+  if (VERBOSE) fprintf(OUTSTREAM, "%s %s, 0x%08X\n", inst, reg_str[reg], i );
 }
 
 void acprintfri ( char *inst, uint reg, uint i )
 {
-	if (VERBOSE) fprintf(OUTSTREAM, "%s %s, 0x%08X\n", inst, reg_str[reg], i);
+  if (VERBOSE) fprintf(OUTSTREAM, "%s %s, 0x%08X\n", inst, reg_str[reg], i);
 }
 
 void acprintfmi ( char *inst, uint a, uint i )
 {
-	if (VERBOSE) fprintf(OUTSTREAM, "%s [0x%08X], 0x%08X\n", inst, a, i );
+  if (VERBOSE) fprintf(OUTSTREAM, "%s [0x%08X], 0x%08X\n", inst, a, i );
 }
 
 void acprintfr16m1616 ( char *inst, uint reg, uint sel, uint offset )
 {
-	if (VERBOSE)
-		fprintf(OUTSTREAM, "%s %s, 0x%04X:0x%04x\n",inst,reg_str16[reg],sel,offset);
+  if (VERBOSE)
+    fprintf(OUTSTREAM, "%s %s, 0x%04X:0x%04x\n",inst,reg_str16[reg],sel,offset);
 }
 
 void acprintfr32m1632 ( char *inst, uint reg, uint sel, uint offset )
 {
-	if (VERBOSE)
-		fprintf(OUTSTREAM, "%s %s, 0x%04X:0x%08X\n", inst, reg_str[reg], sel, offset);
+  if (VERBOSE)
+    fprintf(OUTSTREAM, "%s %s, 0x%04X:0x%08X\n", inst, reg_str[reg], sel, offset);
 }
 
 void acprintfr16m ( char *inst, uint reg, uint a )
 {
-	if (VERBOSE) fprintf(OUTSTREAM, "%s %s, 0x%08X\n", inst, reg_str16[reg], a);
+  if (VERBOSE) fprintf(OUTSTREAM, "%s %s, 0x%08X\n", inst, reg_str16[reg], a);
 }
 
 void acprintfr32m ( char *inst, uint reg, uint a )
 {
-	if (VERBOSE) fprintf(OUTSTREAM, "%s %s, 0x%08X\n", inst, reg_str[reg], a);
+  if (VERBOSE) fprintf(OUTSTREAM, "%s %s, 0x%08X\n", inst, reg_str[reg], a);
 }
 
 // ----------------------------------------------------------------------------
@@ -222,25 +232,25 @@ void acprintfr32m ( char *inst, uint reg, uint a )
 
 bool shiftLeft ( signed int *dest, signed char count )
 {
-        bool ret_val=false;
-        if ( count > 0 )
-        {
-                (*dest) = (*dest) << count - 1;
-                if ( (*dest) & (1<<31) ) ret_val = true;
-                (*dest) = (*dest) << 1;
-        }
-        else if ( count < 0 )
-        {
-                (*dest) = (*dest) << count + 1;
-                if ( (*dest) & (1) ) ret_val = true;
-                (*dest) = (*dest) >> 1;
-        }
-        return ret_val;
+  bool ret_val=false;
+  if ( count > 0 )
+    {
+      (*dest) = (*dest) << count - 1;
+      if ( (*dest) & (1<<31) ) ret_val = true;
+      (*dest) = (*dest) << 1;
+    }
+  else if ( count < 0 )
+    {
+      (*dest) = (*dest) << count + 1;
+      if ( (*dest) & (1) ) ret_val = true;
+      (*dest) = (*dest) >> 1;
+    }
+  return ret_val;
 }
 
 bool shiftRight ( signed int *dest, unsigned char count )
 {
-        return shiftLeft(dest, ((~count)+0x01));
+  return shiftLeft(dest, ((~count)+0x01));
 }
 
 // ----------------------------------------------------------------------------
@@ -249,40 +259,40 @@ bool shiftRight ( signed int *dest, unsigned char count )
 
 bool MSB32 ( uint b )
 {
-	return (b&(1<<31));
+  return (b&(1<<31));
 }
 
 bool MSB16 ( uint b )
 {
-	return (b&(1<<15));
+  return (b&(1<<15));
 }
 
 bool MSB8 ( uint b )
 {
-	return (b&(1<<7));
+  return (b&(1<<7));
 }
 
 bool LSB ( uint b )
 {
-	return (b&(0x01));
+  return (b&(0x01));
 }
 
 bool testBit ( uint array, long index )
 {
-	long realIndex = index%32;
-	uint mask = (uint)(1<<realIndex);
-	if ( array & mask ) return true;
-	return false;
+  long realIndex = index%32;
+  uint mask = (uint)(1<<realIndex);
+  if ( array & mask ) return true;
+  return false;
 }
 
 bool testMemBit ( uint address, long index )
 {
-	uint realAddress = (uint)(address + (index/8));
-	long realIndex = index%8;
-	if ( realIndex < 0x00 ) realIndex = -realIndex;
-	uint mask = (uint)(1<<realIndex);
-	if ( MEM.read_byte(realAddress) & mask ) return true;
-	return false;
+  uint realAddress = (uint)(address + (index/8));
+  long realIndex = index%8;
+  if ( realIndex < 0x00 ) realIndex = -realIndex;
+  uint mask = (uint)(1<<realIndex);
+  if ( MEM.read_byte(realAddress) & mask ) return true;
+  return false;
 }
 
 void setBit ( uint *array, long index )
@@ -391,45 +401,45 @@ uint pop()
 // ----------------------------------------------------------------------------
 void setFlag ( uint flagId )
 {
-	uint temp = SPR.read(EFLAGS)|flagId;
-	SPR.write(EFLAGS,temp);
+  uint temp = SPR.read(EFLAGS)|flagId;
+  SPR.write(EFLAGS,temp);
 }
 
 void resetFlag ( uint flagId )
 {
-	uint temp = SPR.read(EFLAGS)&(~flagId);
-	SPR.write(EFLAGS,temp);
+  uint temp = SPR.read(EFLAGS)&(~flagId);
+  SPR.write(EFLAGS,temp);
 }
 
 void writeFlag ( uint flagId, bool val )
 {
-	if ( val ) setFlag(flagId);
-	else resetFlag(flagId);
+  if ( val ) setFlag(flagId);
+  else resetFlag(flagId);
 }
 
 void compFlag ( uint flagId )
 {
-	uint temp = SPR.read(EFLAGS);
-	if (temp&flagId) resetFlag(flagId);
-	else setFlag(flagId);
+  uint temp = SPR.read(EFLAGS);
+  if (temp&flagId) resetFlag(flagId);
+  else setFlag(flagId);
 }
 
 bool testFlag ( uint flagId )
 {
-	uint temp = SPR.read(EFLAGS);
-	if ( temp & flagId ) return true;
-	return false;
+  uint temp = SPR.read(EFLAGS);
+  if ( temp & flagId ) return true;
+  return false;
 }
 
 bool checkParity ( uint res )
 {
-	unsigned char aux = (unsigned char)res;
-	uint parity = 0;
-	for ( int i=0; i<8; i++ )
-		if ( aux&(1<<i) ) parity++;
-	if ( (parity % 2) || (parity==0) )
-		return false;
-	return true;
+  unsigned char aux = (unsigned char)res;
+  uint parity = 0;
+  for ( int i=0; i<8; i++ )
+    if ( aux&(1<<i) ) parity++;
+  if ( (parity % 2) || (parity==0) )
+    return false;
+  return true;
 }
 
 bool checkCarry ( uint oper, uint op1, uint op2, uint res )
@@ -636,6 +646,29 @@ void checkFlags ( uint oper, uint op1, uint op2, uint res, uint flags )
 	}
 }
 
+
+//-----------------------------------                                                                                                        
+//Flags -- Auxiliar Functions -- Begin                                                                                                       //----------------------------------                                                                                                          
+
+void setFlags_af(uint flag,uint reg){
+
+/*****
+Function to set 'flag' according to the 
+resulting binary value in the 'reg' register
+*****/
+
+  if ( flag&FLAG_SF )
+    if ( reg >= 0 ) resetFlag( FLAG_CF );
+    else setFlag( FLAG_CF );
+  if ( flag&FLAG_ZF )
+    if ( reg == 0 ) setFlag( FLAG_ZF );
+    else resetFlag( FLAG_ZF );
+  if ( flag&FLAG_PF )
+    checkParity( reg );
+}//setFlag                                                                                                                                    
+
+//-----------------------------------                                                                                                        
+//Flags -- Auxiliar Functions -- End                                                                                                         //----------------------------------                                                                                                          
 // ----------------------------------------------------------------------------
 // Generic processed data to instructions abstraction -------------------------
 // ----------------------------------------------------------------------------
@@ -1132,6 +1165,9 @@ void processData(uint mod, uint regop, uint rm, uint sib, uint disp, uint imm)
                 break;
         };
 }
+
+
+
 
 //!Behavior executed before simulation begins.
 void ac_behavior( begin )
@@ -4984,15 +5020,15 @@ void ac_behavior( sub_rm8_imm8 )
 //!Instruction inc_rm8 behavior method
 void ac_behavior( inc_rm8 )
 {
-	acprintf ( "CALLED INC RM8\n" );
-	unsigned char op1;
-	if ( data.usesMemory() ) op1 = MEM.read_byte(data.address());
-	else op1 = readRegister8(data.reg2());
-	unsigned char op2 = 1;
-	unsigned char res = op1 + op2;
-	if ( data.usesMemory() ) MEM.write_byte(data.address(),res);
-	else writeRegister8(data.reg2(),res);
-	checkFlags8(OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+  acprintf ( "CALLED INC RM8\n" );
+  unsigned char op1;
+  if ( data.usesMemory() ) op1 = MEM.read_byte(data.address());
+  else op1 = readRegister8(data.reg2());
+  unsigned char op2 = 1;
+  unsigned char res = op1 + op2;
+  if ( data.usesMemory() ) MEM.write_byte(data.address(),res);
+  else writeRegister8(data.reg2(),res);
+  checkFlags8(OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 //!Instruction dec_rm8 behavior method
@@ -5309,26 +5345,26 @@ void ac_behavior( dump_registers )
 //!Instruction dump_memory behavior method.
 void ac_behavior( dump_memory )
 {
-	if ( VERBOSE ) {
-	printf ( "------------------ Memory dump begin --------------------\n" );
-	printf ( "From : %08X\tTo : %08X\n", iadd, eadd );
-	printf ( "- Data --------------------------------------------------\n" );
-	unsigned int numBytes = (eadd-iadd);
-	unsigned int counter = 0;
-	unsigned char d;
-	if ( eadd < iadd ) numBytes = 0;
-	while ( counter <= numBytes )
-	{
-		if ( !(counter%8) ) printf ( "%08X\t", iadd+counter );
-		d = MEM.read(iadd+counter);
-		printf ( "%02X", d );
-		counter++;
-		if ( !(counter%8) ) printf ( "\n" );
-		else printf ( " " );
-	}
-	if ( counter%8 ) printf ( "\n" );
-	printf ( "------------------ Memory dump end ----------------------\n\n" );
-	}
+  if ( VERBOSE ) {
+    printf ( "------------------ Memory dump begin --------------------\n" );
+    printf ( "From : %08X\tTo : %08X\n", iadd, eadd );
+    printf ( "- Data --------------------------------------------------\n" );
+    unsigned int numBytes = (eadd-iadd);
+    unsigned int counter = 0;
+    unsigned char d;
+    if ( eadd < iadd ) numBytes = 0;
+    while ( counter <= numBytes )
+      {
+	if ( !(counter%8) ) printf ( "%08X\t", iadd+counter );
+	d = MEM.read(iadd+counter);
+	printf ( "%02X", d );
+	counter++;
+	if ( !(counter%8) ) printf ( "\n" );
+	else printf ( " " );
+      }
+    if ( counter%8 ) printf ( "\n" );
+    printf ( "------------------ Memory dump end ----------------------\n\n" );
+  }
 }
 
 //!Instruction dumpt_stack behavior method.
@@ -5351,59 +5387,122 @@ void ac_behavior( dump_stack )
 //}
 
 
+//!Instruction aaa description
+
+/* *********************************************               
+Description:                                                                                                                                 Adjusts the sum of two unpacked BCD values to create an unpacked BCD result. The AL                                                          register is the implied source and destination operand for this instruction. The AAA instruction                                         
+is only useful when it follows an ADD instruction that adds (binary addition) two unpacked                                                  BCD values and stores a byte result in the AL register. The AAA instruction then adjusts the                                                 contents of the AL register to contain the correct 1-digit unpacked BCD result.                                                              
+If the addition produces a decimal carry, the AH register increments by 1, and the CF and AF                                                 
+flags are set. If there was no decimal carry, the CF and AF flags are cleared and the AH register                                            
+is unchanged. In either case, bits 4 through 7 of the AL register are set to 0.                                                              
+********************************************** */
+
 
 
 //!Instruction aaa behavior method.
-void ac_behavior( aaa )
-{
-  unsigned int aux;
-  acprintf( "AAA\n" );
-  aux = readRegister8( AL );
-  if ( ( (aux & 0x0F) > 9 ) or ( testFlag(FLAG_AF) == 1 ) ){ 
-    aux = readRegister8( AL );
+void ac_behavior( aaa ){
+  uint aux;
+  acprintf( "AAA - not tested\n" );
+  
+  aux = GR[AL];
+  if ( ( (aux & 0x0F) > 9 ) or ( testFlag(FLAG_AF) ) ){ 
     aux+=6;
-    writeRegister( AL,aux );
-    aux = readRegister8( AH );
+    GR[AL] = aux;
+    aux = GR[AH];
     aux+=1;
-    writeRegister( AH,aux ); 
+    GR[AH] = aux; 
     writeFlag( FLAG_AF, 1);
     writeFlag( FLAG_CF, 1);
-    aux = readRegister8( AL );
+    aux = GR[AL];
     aux = ( aux & 0x0F );
-    writeRegister( AL,aux );
+    GR[AL] = aux;
   }//if
   else{
     resetFlag(FLAG_AF);
     resetFlag(FLAG_CF);
-    aux = readRegister8( AL );
+    aux = GR[AL];
     aux = ( aux & 0x0F );
-    writeRegister8( AL,aux );
-
+    GR[AL] = aux;
   }//else
 }//ac_behavior(aaa)
 
 
-
-
+//!Instruction aad description
+/*                                            
+Description:                                                                                                                                 
+Adjusts two unpacked BCD digits (the least-significant digit in the AL register and the mostsignificant                                      
+digit in the AH register) so that a division operation performed on the result will yield                                                    
+a correct unpacked BCD value. The AAD instruction is only useful when it precedes a DIV                                                      
+instruction that divides (binary division) the adjusted value in the AX register by an unpacked                                              
+BCD value.                                                                                                                                   
+The AAD instruction sets the value in the AL register to (AL + (10 * AH)), and then clears the                                               
+AH register to 00H. The value in the AX register is then equal to the binary equivalent of the                                               original unpacked two-digit (base 10) number in registers AH and AL.                                                                        
+*/
 //!Instruction aad behavior method.
 void ac_behavior( aad ){
-  char tempAL,tempAH;
-  acprintf ( " AD\n" );
-  tempAL = readRegister(AL);
-  tempAH = readRegister(AH);
-  writeRegister8( AL, ( ( tempAL + ( tempAH*0x0A)  )  & 0xFF) );
-  writeRegister8( AH, 0);
-   
+  uint tempAL,tempAH;
+  acprintf ( " AAD - not tested\n" );
+  tempAL = GR[AL];
+  tempAH = GR[AH];
+  GR[AL] =  (( tempAL + ( tempAH*0x0A)  )  & 0xFF);
+  GR[AH] = 0;
+  setFlags_af( FLAG_ALL, GR[AL] );
 }//ac_behavior( aad ){
 
+
+//!Instruction aam description
+/* ************************************     
+Description:                                                                                                                                 
+Adjusts the result of the multiplication of two unpacked BCD values to create a pair of unpacked                                             
+(base 10) BCD values. The AX register is the implied source and destination operand for this                                                 instruction. The AAM instruction is only useful when it follows an MUL instruction that multiplies
+(binary multiplication) two unpacked BCD values and stores a word result in the AX
+register. The AAM instruction then adjusts the contents of the AX register to contain the correct
+2-digit unpacked (base 10) BCD result.
+************************************ */
 //!Instruction aam behavior method.
 void ac_behavior( aam ){
-	acprintf ( " AAM <Not implemented>\n" );
+  uint tempAL;
+  acprintf ( " AAM - not tested\n" );
+  tempAL = GR[AL];
+  GR[AH] = ( tempAL / 0x0A );
+  GR[AL] = ( tempAL % 0x0A );
+  setFlags_af( FLAG_ALL,GR[AL] );
+
 } //ac_behavior( aam )
 
+//!Instruction aas description
+/* *****************************************************    
+Adjusts the result of the subtraction of two unpacked BCD values to create a unpacked BCD                                                    
+result. The AL register is the implied source and destination operand for this instruction. The                                              
+AAS instruction is only useful when it follows a SUB instruction that subtracts (binary subtraction)                                         
+one unpacked BCD value from another and stores a byte result in the AL register. The AAA                                                     
+instruction then adjusts the contents of the AL register to contain the correct 1-digit unpacked                                             
+BCD result.                                                                                                                                  
+If the subtraction produced a decimal carry, the AH register decrements by 1, and the CF and                                                 
+AF flags are set. If no decimal carry occurred, the CF and AF flags are cleared, and the AH                                                  
+register is unchanged. In either case, the AL register is left with its top nibble set to 0.                                                 
+******************************************************* */
 //!Instruction aas behavior method.
 void ac_behavior( aas ){
-  acprintf ( " AAS <Not implemented>\n" );
+  uint aux;
+  acprintf ( " AAS <Not tested>\n" );
+  if ( ((GR[AL] & 0x0F) > 9) || ( testFlag( FLAG_AF )) ){
+    aux = GR[AL];
+    aux = aux - 6;
+    aux = (aux & 0x0F);
+    GR[AL] = aux;
+    aux = GR[AH];
+    aux = aux - 1;
+    setFlag( FLAG_AF );
+    setFlag( FLAG_CF );
+  }//if
+  else{
+    resetFlag( FLAG_CF );
+    resetFlag( FLAG_AF );
+    aux = GR[AL];
+    aux = ( aux & 0x0F );
+  }//else
+
 } //ac_behavior( aas )
 
 
@@ -5434,8 +5533,4 @@ void ac_behavior( aam ){
 } //ac_behavior( aam )
 
 
-//!Instruction aam behavior method.
-void ac_behavior( aam ){
-	acprintf ( " AAM <Not implemented>\n" );
-} //ac_behavior( aam )
 */
