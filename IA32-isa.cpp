@@ -28,15 +28,14 @@
 
 //Rafael Madeira
 /******************************
-24/02/06
-Continuar implementação das rotinas
-auxiliares para flags
-
+Rotinas Alteradas:
+readRegister8();
+writeRegister8();
 ******************************/
 
-
-#include  "IA32-isa.H"
-#include  "ac_isa_init.cpp"
+       
+#include "IA32-isa.H"
+#include "ac_isa_init.cpp"
 #include <math.h>
 
 // Register definitions to register bank GR:8
@@ -297,48 +296,48 @@ bool testMemBit ( uint address, long index )
 
 void setBit ( uint *array, long index )
 {
-	long realIndex = index%32;
-	uint mask = (uint)(1<<realIndex);
-	(*array) = (*array)|mask;
+  long realIndex = index%32;
+  uint mask = (uint)(1<<realIndex);
+  (*array) = (*array)|mask;
 }
 
 void setMemBit ( uint address, long index )
 {
-	uint realAddress = (uint)(address + (index/8));
-	long realIndex = index%8;
-	if ( realIndex < 0x00 ) realIndex = -realIndex;
-	uint mask = (uint)(1<<realIndex);
-	unsigned char aux = MEM.read_byte(realAddress);
-	MEM.write_byte(realAddress,aux|mask);
+  uint realAddress = (uint)(address + (index/8));
+  long realIndex = index%8;
+  if ( realIndex < 0x00 ) realIndex = -realIndex;
+  uint mask = (uint)(1<<realIndex);
+  unsigned char aux = MEM.read_byte(realAddress);
+  MEM.write_byte(realAddress,aux|mask);
 }
 
 void resetBit ( uint *array, long index )
 {
-	long realIndex = index%32;
-	uint mask = (~((uint)(1<<realIndex)));
-	(*array) = (*array)&mask;
+  long realIndex = index%32;
+  uint mask = (~((uint)(1<<realIndex)));
+  (*array) = (*array)&mask;
 }
 
 void resetMemBit ( uint address, long index )
 {
-	uint realAddress = (uint)(address + (index/8));
-	long realIndex = index%8;
-	if ( realIndex < 0x00 ) realIndex = -realIndex;
-	uint mask = (~((uint)(1<<realIndex)));
-	unsigned char aux = MEM.read_byte(realAddress);
-	MEM.write_byte(realAddress,aux&mask);
+  uint realAddress = (uint)(address + (index/8));
+  long realIndex = index%8;
+  if ( realIndex < 0x00 ) realIndex = -realIndex;
+  uint mask = (~((uint)(1<<realIndex)));
+  unsigned char aux = MEM.read_byte(realAddress);
+  MEM.write_byte(realAddress,aux&mask);
 }
 
 void compBit ( uint *array, long index )
 {
-	if ( testBit((*array),index) ) resetBit(array,index);
-	else setBit(array,index);
+  if ( testBit((*array),index) ) resetBit(array,index);
+  else setBit(array,index);
 }
 
 void compMemBit ( uint address, long index )
 {
-	if ( testMemBit(address,index) ) resetMemBit ( address,index );
-	else setMemBit ( address, index );
+  if ( testMemBit(address,index) ) resetMemBit ( address,index );
+  else setMemBit ( address, index );
 }
 
 // ----------------------------------------------------------------------------
@@ -346,54 +345,54 @@ void compMemBit ( uint address, long index )
 // ----------------------------------------------------------------------------
 void push ( uint d )
 {
-	uint temp;
-	if ( OperandSize == OPERAND_SIZE16 )
-	{
-		temp = GR.read(ESP) - 2;
-		GR.write(ESP,temp);
-		MEM.write_half(temp, (unsigned short)d);
-	}
-	else if ( OperandSize == OPERAND_SIZE32 )
-	{
-		temp = GR.read(ESP) - 4;
-		GR.write(ESP,temp);
-		MEM.write(temp, d);
-	}
+  uint temp;
+  if ( OperandSize == OPERAND_SIZE16 )
+    {
+      temp = GR.read(ESP) - 2;
+      GR.write(ESP,temp);
+      MEM.write_half(temp, (unsigned short)d);
+    }
+  else if ( OperandSize == OPERAND_SIZE32 )
+    {
+      temp = GR.read(ESP) - 4;
+      GR.write(ESP,temp);
+      MEM.write(temp, d);
+    }
 }
 
 uint pop()
 {
-	signed short r16;
-	signed int aux;
-	uint temp, ret;
-	temp = GR.read(ESP);
-	if ( OperandSize == OPERAND_SIZE16 )
+  signed short r16;
+  signed int aux;
+  uint temp, ret;
+  temp = GR.read(ESP);
+  if ( OperandSize == OPERAND_SIZE16 )
+    {
+      r16 = MEM.read_half(temp);
+      GR.write(ESP, temp+2);
+      aux = r16;
+      ret = aux;
+    }
+  else if ( OperandSize == OPERAND_SIZE32 )
+    {
+      if ( temp == STACK_BOTTOM )
 	{
-		r16 = MEM.read_half(temp);
-		GR.write(ESP, temp+2);
-		aux = r16;
-		ret = aux;
+	  fprintf ( stderr, "Stack is empty!\n" );
+	  return 0;
 	}
-	else if ( OperandSize == OPERAND_SIZE32 )
+      ret = MEM.read(temp);
+      GR.write(ESP,temp+4);
+      if ((GR.read(ESP) == STACK_BOTTOM) && (ret == 0xCC00))
 	{
-		if ( temp == STACK_BOTTOM )
-		{
-			fprintf ( stderr, "Stack is empty!\n" );
-			return 0;
-		}
-		ret = MEM.read(temp);
-		GR.write(ESP,temp+4);
-		if ((GR.read(ESP) == STACK_BOTTOM) && (ret == 0xCC00))
-		{
-			fprintf(stderr,"ArchC: Simulation terminated, found end of program.\n");
-			ac_stop(0);
-			fprintf ( stderr, "\n" );
-			PrintStat();
-			fprintf ( stderr, "\n" );
-			exit(1);
-		}
+	  fprintf(stderr,"ArchC: Simulation terminated, found end of program.\n");
+	  ac_stop(0);
+	  fprintf ( stderr, "\n" );
+	  PrintStat();
+	  fprintf ( stderr, "\n" );
+	  exit(1);
 	}
-	return ret;
+    }
+  return ret;
 }
 
 // ----------------------------------------------------------------------------
@@ -444,211 +443,213 @@ bool checkParity ( uint res )
 
 bool checkCarry ( uint oper, uint op1, uint op2, uint res )
 {
-	unsigned long long lop1 = op1;
-	unsigned long long lop2 = op2;
-	unsigned long long aux = lop1+lop2;
-	switch ( oper )
-	{
-		case OPER_MUL:
-			if (res) return true;
-		break;
-		case OPER_ADD:
-		if ( aux > 0xFFFFFFFF )
-			return true;
-		return false;
-		break;
-		case OPER_SUB:
-		if ( op1 < op2 ) return true;
-		return false;
-		break;
-	};
-	return false;
+  unsigned long long lop1 = op1;
+  unsigned long long lop2 = op2;
+  unsigned long long aux = lop1+lop2;
+  switch ( oper )
+    {
+    case OPER_MUL:
+      if (res) return true;
+      break;
+    case OPER_ADD:
+      if ( aux > 0xFFFFFFFF )
+	return true;
+      return false;
+      break;
+    case OPER_SUB:
+      if ( op1 < op2 ) return true;
+      return false;
+      break;
+    };
+  return false;
 }
 
 bool checkCarry16 ( uint oper, uint op1, uint op2, uint res )
 {
-        unsigned short lop1 = op1;
-        unsigned short lop2 = op2;
-        unsigned long aux = lop1+lop2;
-        switch ( oper )
-        {
-                case OPER_MUL:
-                        if (res) return true;
-                break;
-                case OPER_ADD:
-                if ( aux > 0xFFFF )
-                        return true;
-                return false;
-                break;
-                case OPER_SUB:
-                if ( op1 < op2 ) return true;
-                return false;
-                break;
-        };
-        return false;
+  unsigned short lop1 = op1;
+  unsigned short lop2 = op2;
+  unsigned long aux = lop1+lop2;
+  switch ( oper )
+    {
+    case OPER_MUL:
+      if (res) return true;
+      break;
+    case OPER_ADD:
+      if ( aux > 0xFFFF )
+	return true;
+      return false;
+      break;
+    case OPER_SUB:
+      if ( op1 < op2 ) return true;
+      return false;
+      break;
+    };
+  return false;
 }
 
 bool checkCarry8 ( uint oper, uint op1, uint op2, uint res )
 {
-        unsigned char lop1 = op1;
-        unsigned char lop2 = op2;
-        unsigned int aux = lop1+lop2;
-        switch ( oper )
-        {
-                case OPER_MUL:
-                        if (res) return true;
-                break;
-                case OPER_ADD:
-                if ( aux > 0xFF )
-                        return true;
-                return false;
-                break;
-                case OPER_SUB:
-                if ( op1 < op2 ) return true;
-                return false;
-                break;
-        };
-        return false;
+  unsigned char lop1 = op1;
+  unsigned char lop2 = op2;
+  unsigned int aux = lop1+lop2;
+  switch ( oper )
+    {
+    case OPER_MUL:
+      if (res) return true;
+      break;
+    case OPER_ADD:
+      if ( aux > 0xFF )
+	return true;
+      return false;
+      break;
+    case OPER_SUB:
+      if ( op1 < op2 ) return true;
+      return false;
+      break;
+    };
+  return false;
 }
 
 bool checkAdjust ( uint oper, uint op1, uint op2, uint res )
 {
-	switch ( oper )
-	{
-		case OPER_ADD:
-                if ( (op1&(1<<4)) && (op2&(1<<4)) && !(res&(1<<4)) ) return true;
-                if ( !(op1&(1<<4)) && !(op2&(1<<4)) && (res&(1<<4)) ) return true;
-                return false;
-		break;
-		case OPER_SUB:
-		op2 = (~op2) + 1;
-                if ( (op1&(1<<4)) && (op2&(1<<4)) && !(res&(1<<4)) ) return true;
-                if ( !(op1&(1<<4)) && !(op2&(1<<4)) && (res&(1<<4)) ) return true;
-                return false;
-		break;
-	};
-	return false;
+  switch ( oper )
+    {
+    case OPER_ADD:
+      if ( (op1&(1<<4)) && (op2&(1<<4)) && !(res&(1<<4)) ) return true;
+      if ( !(op1&(1<<4)) && !(op2&(1<<4)) && (res&(1<<4)) ) return true;
+      return false;
+      break;
+    case OPER_SUB:
+      op2 = (~op2) + 1;
+      if ( (op1&(1<<4)) && (op2&(1<<4)) && !(res&(1<<4)) ) return true;
+      if ( !(op1&(1<<4)) && !(op2&(1<<4)) && (res&(1<<4)) ) return true;
+      return false;
+      break;
+    };
+  return false;
 }
 
 bool checkOverflow ( uint oper, uint op1, uint op2, uint res )
 {
-        signed int sop1 = op1;
-        signed int sop2 = op2;
-        signed int sres = res;
-        switch ( oper )
-        {
-                case OPER_ADD:
-                if ( (sop1<0) && (sop2<0) && (sres>0) ) return true;
-                if ( (sop1>0) && (sop2>0) && (sres<0) ) return true;
-                return false;
-                break;
-                case OPER_SUB:
-                sop2 = -sop2;
-                if ( (sop1<0) && (sop2<0) && (sres>0) ) return true;
-                if ( (sop1>0) && (sop2>0) && (sres<0) ) return true;
-                return false;
-                break;
-                case OPER_MUL:
-                if ( res != 0 ) return true;
-                return false;
-                break;
-        }
-        return false;
+  signed int sop1 = op1;
+  signed int sop2 = op2;
+  signed int sres = res;
+  switch ( oper )
+    {
+    case OPER_ADD:
+      if ( (sop1<0) && (sop2<0) && (sres>0) ) return true;
+      if ( (sop1>0) && (sop2>0) && (sres<0) ) return true;
+      return false;
+      break;
+    case OPER_SUB:
+      sop2 = -sop2;
+      if ( (sop1<0) && (sop2<0) && (sres>0) ) return true;
+      if ( (sop1>0) && (sop2>0) && (sres<0) ) return true;
+      return false;
+      break;
+    case OPER_MUL:
+      if ( res != 0 ) return true;
+      return false;
+      break;
+    }
+  return false;
 }
 
 bool checkOverflow16 ( uint oper, uint op1, uint op2, uint res )
 {
-        signed short sop1 = op1;
-        signed short sop2 = op2;
-        signed short sres = res;
-        switch ( oper )
-        {
-                case OPER_ADD:
-                if ( (sop1<0) && (sop2<0) && (sres>0) ) return true;
-                if ( (sop1>0) && (sop2>0) && (sres<0) ) return true;
-                return false;
-                break;
-                case OPER_SUB:
-                sop2 = -sop2;
-                if ( (sop1<0) && (sop2<0) && (sres>0) ) return true;
-                if ( (sop1>0) && (sop2>0) && (sres<0) ) return true;
-                return false;
-                break;
-                case OPER_MUL:
-                if ( res != 0 ) return true;
-                return false;
-                break;
-        }
-        return false;
+  signed short sop1 = op1;
+  signed short sop2 = op2;
+  signed short sres = res;
+  switch ( oper )
+    {
+    case OPER_ADD:
+      if ( (sop1<0) && (sop2<0) && (sres>0) ) return true;
+      if ( (sop1>0) && (sop2>0) && (sres<0) ) return true;
+      return false;
+      break;
+    case OPER_SUB:
+      sop2 = -sop2;
+      if ( (sop1<0) && (sop2<0) && (sres>0) ) return true;
+      if ( (sop1>0) && (sop2>0) && (sres<0) ) return true;
+      return false;
+      break;
+    case OPER_MUL:
+      if ( res != 0 ) return true;
+      return false;
+      break;
+    }
+  return false;
 }
 
 bool checkOverflow8 ( uint oper, uint op1, uint op2, uint res )
 {
-        signed char sop1 = op1;
-        signed char sop2 = op2;
-        signed char sres = res;
-        switch ( oper )
-        {
-                case OPER_ADD:
-                if ( (sop1<0) && (sop2<0) && (sres>0) ) return true;
-                if ( (sop1>0) && (sop2>0) && (sres<0) ) return true;
-                return false;
-                break;
-                case OPER_SUB:
-                sop2 = -sop2;
-                if ( (sop1<0) && (sop2<0) && (sres>0) ) return true;
-                if ( (sop1>0) && (sop2>0) && (sres<0) ) return true;
-                return false;
-                break;
-                case OPER_MUL:
-                if ( res != 0 ) return true;
-                return false;
-                break;
-        }
-        return false;
+  signed char sop1 = op1;
+  signed char sop2 = op2;
+  signed char sres = res;
+  switch ( oper )
+    {
+    case OPER_ADD:
+      if ( (sop1<0) && (sop2<0) && (sres>0) ) return true;
+      if ( (sop1>0) && (sop2>0) && (sres<0) ) return true;
+      return false;
+      break;
+    case OPER_SUB:
+      sop2 = -sop2;
+      if ( (sop1<0) && (sop2<0) && (sres>0) ) return true;
+      if ( (sop1>0) && (sop2>0) && (sres<0) ) return true;
+      return false;
+      break;
+    case OPER_MUL:
+      if ( res != 0 ) return true;
+      return false;
+      break;
+    }
+  return false;
 }
 
 void checkFlags8 ( uint oper, uint op1, uint op2, uint res, uint flags )
 {
-	if ( flags&FLAG_CF ) writeFlag(FLAG_CF, checkCarry8(oper,op1,op2,res));
-	if ( flags&FLAG_PF ) writeFlag(FLAG_PF, checkParity(res));
-	if ( flags&FLAG_AF ) writeFlag(FLAG_AF, checkAdjust(oper,op1,op2,res));
-	if ( flags&FLAG_ZF ) writeFlag(FLAG_ZF, !res);
-	if ( flags&FLAG_SF ) writeFlag(FLAG_SF, MSB8(res));
-	if ( flags&FLAG_OF ) writeFlag(FLAG_OF, checkOverflow8(oper,op1,op2,res));
+  if ( flags&FLAG_CF ) writeFlag(FLAG_CF, checkCarry8(oper,op1,op2,res));
+  if ( flags&FLAG_PF ) writeFlag(FLAG_PF, checkParity(res));
+  if ( flags&FLAG_AF ) writeFlag(FLAG_AF, checkAdjust(oper,op1,op2,res));
+  if ( flags&FLAG_ZF ) writeFlag(FLAG_ZF, !res);
+  if ( flags&FLAG_SF ) writeFlag(FLAG_SF, MSB8(res));
+  if ( flags&FLAG_OF ) writeFlag(FLAG_OF, checkOverflow8(oper,op1,op2,res));
 }
 
 void checkFlags ( uint oper, uint op1, uint op2, uint res, uint flags )
 {
-	if ( flags&FLAG_CF )
-	{
-		if ( OperandSize == OPERAND_SIZE16 )
-			writeFlag(FLAG_CF, checkCarry16(oper,op1,op2,res) );
-		else if ( OperandSize == OPERAND_SIZE32 )
-			writeFlag(FLAG_CF, checkCarry(oper,op1,op2,res) );
-	}
-	if ( flags&FLAG_PF ) writeFlag(FLAG_PF, checkParity(res));
-	if ( flags&FLAG_AF ) writeFlag(FLAG_AF, checkAdjust(oper,op1,op2,res) );
-	if ( flags&FLAG_ZF ) writeFlag(FLAG_ZF, !res);
-	if ( flags&FLAG_SF )
-	{
-		if ( OperandSize == OPERAND_SIZE16 )
-			writeFlag(FLAG_SF, MSB16(res));
-		else if ( OperandSize == OPERAND_SIZE32 )
-			writeFlag(FLAG_SF, MSB32(res));
-	}
-	if ( flags&FLAG_OF )
-	{
-		if ( OperandSize == OPERAND_SIZE16 )
-			writeFlag(FLAG_OF, checkOverflow16(oper,op1,op2,res));
-		else if ( OperandSize == OPERAND_SIZE32 )
-			writeFlag(FLAG_OF, checkOverflow(oper,op1,op2,res));
-	}
+  if ( flags&FLAG_CF )
+    {
+      if ( OperandSize == OPERAND_SIZE16 )
+	writeFlag(FLAG_CF, checkCarry16(oper,op1,op2,res) );
+      else if ( OperandSize == OPERAND_SIZE32 )
+	writeFlag(FLAG_CF, checkCarry(oper,op1,op2,res) );
+    }
+  if ( flags&FLAG_PF ) writeFlag(FLAG_PF, checkParity(res));
+  if ( flags&FLAG_AF ) writeFlag(FLAG_AF, checkAdjust(oper,op1,op2,res) );
+  if ( flags&FLAG_ZF ) writeFlag(FLAG_ZF, !res);
+  if ( flags&FLAG_SF )
+    {
+      if ( OperandSize == OPERAND_SIZE16 )
+	writeFlag(FLAG_SF, MSB16(res));
+      else if ( OperandSize == OPERAND_SIZE32 )
+	writeFlag(FLAG_SF, MSB32(res));
+    }
+  if ( flags&FLAG_OF )
+    {
+      if ( OperandSize == OPERAND_SIZE16 )
+	writeFlag(FLAG_OF, checkOverflow16(oper,op1,op2,res));
+      else if ( OperandSize == OPERAND_SIZE32 )
+	writeFlag(FLAG_OF, checkOverflow(oper,op1,op2,res));
+    }
 }
 
 
-//-----------------------------------                                                                                                        
-//Flags -- Auxiliar Functions -- Begin                                                                                                       //----------------------------------                                                                                                          
+//-----------------------------------                                                                                                    
+//Flags -- Auxiliar Functions -- Begin
+//----------------------------------
+                                                                                                          
 
 void setFlags_af(uint flag,uint reg){
 
@@ -664,38 +665,39 @@ resulting binary value in the 'reg' register
     if ( reg == 0 ) setFlag( FLAG_ZF );
     else resetFlag( FLAG_ZF );
   if ( flag&FLAG_PF )
-    checkParity( reg );
-}//setFlag                                                                                                                                    
+    writeFlag(FLAG_PF,checkParity( reg ));
+}//setFlag                                                                                                                               
 
-//-----------------------------------                                                                                                        
-//Flags -- Auxiliar Functions -- End                                                                                                         //----------------------------------                                                                                                          
+//-----------------------------------                                                                                                    
+//Flags -- Auxiliar Functions -- End                                                                                                    
+//----------------------------------   
 // ----------------------------------------------------------------------------
 // Generic processed data to instructions abstraction -------------------------
 // ----------------------------------------------------------------------------
 
 uint readMemory(uint a)
 {
-	signed int aux;
-	signed short aux16;
-	if ( OperandSize == OPERAND_SIZE16 )
-	{
-		aux16 = (MEM.read_half(a) & MASK_16BITS);
-		aux = aux16;
-	}
-	else if ( OperandSize == OPERAND_SIZE32 )
-	{
-		aux = MEM.read(a);
-	}
-	return aux;
+  signed int aux;
+  signed short aux16;
+  if ( OperandSize == OPERAND_SIZE16 )
+    {
+      aux16 = (MEM.read_half(a) & MASK_16BITS);
+      aux = aux16;
+    }
+  else if ( OperandSize == OPERAND_SIZE32 )
+    {
+      aux = MEM.read(a);
+    }
+  return aux;
 }
 
 uint readMemory16(uint a)
 {
-	signed int aux;
-	signed short aux16;
-	aux16 = (MEM.read_half(a) & MASK_16BITS);
-	aux = aux16;
-	return aux;
+  signed int aux;
+  signed short aux16;
+  aux16 = (MEM.read_half(a) & MASK_16BITS);
+  aux = aux16;
+  return aux;
 }
 
 uint readMemory8(uint a)
@@ -709,172 +711,210 @@ uint readMemory8(uint a)
 
 void writeMemory(uint a, uint val)
 {
-	unsigned short aux16 = (val & MASK_16BITS);
-	if ( OperandSize == OPERAND_SIZE16 )
-		MEM.write_half(a, aux16);
-	else if ( OperandSize == OPERAND_SIZE32 )
-		MEM.write(a, val);
+  unsigned short aux16 = (val & MASK_16BITS);
+  if ( OperandSize == OPERAND_SIZE16 )
+    MEM.write_half(a, aux16);
+  else if ( OperandSize == OPERAND_SIZE32 )
+    MEM.write(a, val);
 }
 
 void writeMemory8(uint a, uint val)
 {
-	MEM.write_byte(a, (val & MASK_8BITS));
+  MEM.write_byte(a, (val & MASK_8BITS));
 }
 
 uint readSPRegister(uint reg)
 {
-	return (SPR.read(reg));
+  return (SPR.read(reg));
 }
 
 void writeSPRegister(uint reg, uint val)
 {
-	if ( OperandSize == OPERAND_SIZE16 )
-		SPR.write(reg, (SPR.read(reg)&0xFFFF0000)|(val&MASK_16BITS));
-	else if ( OperandSize == OPERAND_SIZE32 )
-		SPR.write(reg, val);
+  if ( OperandSize == OPERAND_SIZE16 )
+    SPR.write(reg, (SPR.read(reg)&0xFFFF0000)|(val&MASK_16BITS));
+  else if ( OperandSize == OPERAND_SIZE32 )
+    SPR.write(reg, val);
 }
 
 uint readSRegister(uint reg)
 {
-	return (SR.read(reg) & MASK_16BITS);
+  return (SR.read(reg) & MASK_16BITS);
 }
 
 void writeSRegister(uint reg, uint val)
 {
-	SR.write(reg, (val & MASK_16BITS));
+  SR.write(reg, (val & MASK_16BITS));
 }
 
 uint readRegister8(uint reg)
 {
-	signed char aux8;
-	signed int aux;
-	switch(reg)
-	{
-		// 8bit access to registers
-		case AL: case CL: case DL: case BL:
-		aux8 = (GR.read(reg) & MASK_8BITS);
-		aux = aux8;
-		return aux;
-		break;
+  signed char aux8;
+  signed int aux;
+  switch(reg)
+    {
+      // 8bit access to registers
+    case AL: case CL: case DL: case BL:
+      aux8 = (GR.read(reg) & MASK_8BITS);
+      aux = aux8;
+      return aux;
+      break;
+      
+    case AH: 
+      reg = 0;// ler de EAX
+      aux8 = ((GR.read(reg)>>8) & MASK_8BITS);
+      aux = aux8;
+      return aux;
+      break;
+    case CH: 
+      reg = 1;// ler de ECX
+      aux8 = ((GR.read(reg)>>8) & MASK_8BITS);
+      aux = aux8;
+      return aux;
+      break;
+    case DH: 
+      reg = 2;// ler de EDX
+      aux8 = ((GR.read(reg)>>8) & MASK_8BITS);
+      aux = aux8;
+      return aux;
+      break;
 
-		case AH: case CH: case DH: case BH:
-		aux8 = ((GR.read(reg)>>8) & MASK_8BITS);
-		aux = aux8;
-		return aux;
-		break;
-	};
-	return INVALID_REGISTER;
+    case BH:
+      reg = 3;// ler de EDX
+      aux8 = ((GR.read(reg)>>8) & MASK_8BITS);
+      aux = aux8;
+      return aux;
+      break;
+    };
+  return INVALID_REGISTER;
 }
 
 uint readRegister(uint reg)
 {
-	signed int aux;
-	signed short aux16;
-	if ( OperandSize == OPERAND_SIZE16 )
+  signed int aux;
+  signed short aux16;
+  if ( OperandSize == OPERAND_SIZE16 )
+    {
+      switch(reg)
 	{
-		switch(reg)
-		{
-			// 16bit access to registers
-			case AX: case CX: case DX: case BX:
-			case SP: case BP: case SI: case DI:
-			aux16 = (GR.read(reg) & MASK_16BITS);
-			aux = aux16;
-			return aux;
-			break;
-		};
-	}
-	else if ( OperandSize == OPERAND_SIZE32 )
+	  // 16bit access to registers
+	case AX: case CX: case DX: case BX:
+	case SP: case BP: case SI: case DI:
+	  aux16 = (GR.read(reg) & MASK_16BITS);
+	  aux = aux16;
+	  return aux;
+	  break;
+	};
+    }
+  else if ( OperandSize == OPERAND_SIZE32 )
+    {
+      switch(reg)
 	{
-		switch(reg)
-		{
-			// 32bit access to registers
-			case EAX: case ECX: case EDX: case EBX:
-			case ESP: case EBP: case ESI: case EDI:
-			return GR.read(reg);
-			break;
-		};
-	}
-	return INVALID_REGISTER;
+	  // 32bit access to registers
+	case EAX: case ECX: case EDX: case EBX:
+	case ESP: case EBP: case ESI: case EDI:
+	  return GR.read(reg);
+	  break;
+	};
+    }
+  return INVALID_REGISTER;
 }
 
 void writeRegister8(uint reg, uint val)
 {
-	switch(reg)
-	{
-		// 8bit access to registers
-		case AL: case CL: case DL: case BL:
-		GR.write(reg, ((GR.read(reg) & 0xFFFFFF00) | (val & MASK_8BITS)));
-		break;
 
-		case AH: case CH: case DH: case BH:
-		GR.write(reg, ((GR.read(reg) & 0xFFFF00FF) | ((val & MASK_8BITS)<<8)));
-		break;
-	}
+ 
+  switch(reg)
+    {
+      // 8bit access to registers
+    case AL: case CL: case DL: case BL:
+      GR.write(reg, ((GR.read(reg) & 0xFFFFFF00) | (val & MASK_8BITS)));
+      break;
+      
+    case AH:
+      reg = 0; //AH sera escrito em EAX 
+      GR.write(reg, ( (GR.read(reg) & 0xFFFF00FF) | ((val & MASK_8BITS)<<8) ));
+      break;
+    case CH: 
+      reg = 1; //CH sera escrito em ECX
+      GR.write(reg, ( (GR.read(reg) & 0xFFFF00FF) | ((val & MASK_8BITS)<<8) ));
+      break;
+    case DH: 
+      reg = 2; //DH sera escrito em EDX
+      GR.write(reg, ( (GR.read(reg) & 0xFFFF00FF) | ((val & MASK_8BITS)<<8) ));
+      break;
+    case BH:
+      reg = 3; //BH sera escrito em EBX
+      GR.write(reg, ( (GR.read(reg) & 0xFFFF00FF) | ((val & MASK_8BITS)<<8) ));
+      break;
+    }
 }
 
 void writeRegister(uint reg, uint val)
 {
-	if ( OperandSize == OPERAND_SIZE16 )
+  if ( OperandSize == OPERAND_SIZE16 )
+    {
+      printf("REG 16bits: %i\n",reg);
+      switch(reg)
 	{
-		switch(reg)
-		{
-			// 16bit access to registers
-			case AX: case CX: case DX: case BX:
-			case BP: case SP: case SI: case DI:
-			GR.write(reg, ((GR.read(reg) & 0xFFFF0000) | (val & MASK_16BITS)));
-			break;
-		};
-	}
-	else if ( OperandSize == OPERAND_SIZE32 )
+	 
+	  // 16bit access to registers
+	case AX: case CX: case DX: case BX:
+	case BP: case SP: case SI: case DI:
+	  GR.write(reg, ((GR.read(reg) & 0xFFFF0000) | (val & MASK_16BITS)));
+	  break;
+	};
+    }
+  else if ( OperandSize == OPERAND_SIZE32 )
+    {
+      printf("REG 32bits: %i\n",reg);
+      switch(reg)
 	{
-		switch(reg)
-		{
-			// 32bit access to registers
-			case EAX: case ECX: case EDX: case EBX:
-			case EBP: case ESP: case ESI: case EDI:
-			GR.write(reg,val);
-			break;
-		};
-	}
+	  // 32bit access to registers
+	case EAX: case ECX: case EDX: case EBX:
+	case EBP: case ESP: case ESI: case EDI:
+	  GR.write(reg,val);
+	  break;
+	};
+    }
 }
 
 class Data
 {
 private:
-	uint Register1;
-	uint Register2;
-	uint Address;
-	unsigned char Address8;
-	signed int Immediate;
-	signed int Immediate8;
-	signed int Immediate16;
-	bool UsesMemory;
+  uint Register1;
+  uint Register2;
+  uint Address;
+  unsigned char Address8;
+  signed int Immediate;
+  signed int Immediate8;
+  signed int Immediate16;
+  bool UsesMemory;
 public:
-	Data(){};
-	~Data(){};
-	bool usesMemory() {return UsesMemory;};
-	void usesMemory(bool aux) {UsesMemory=aux;};
-	uint reg1() {return Register1;};
-	void reg1(uint r) {Register1=r;};
-	uint reg2() {return Register2;};
-	void reg2(uint r) {Register2=r;};
-	uint address() {return Address;};
-	void address(uint a) {Address=a;};
-	unsigned char address8() {return Address8;};
-	void address8(unsigned char a) {Address8=a;};
-	uint immediate() {ac_pc+=4; SPR.write(EIP,(int)ac_pc); return Immediate;};
-	void immediate(signed int i) {Immediate=i;};
-	uint immediate8() {ac_pc+=1; SPR.write(EIP,(int)ac_pc); return Immediate8;};
-	void immediate8(signed char i) {Immediate8=i;};
-	uint immediate16() {ac_pc+=2; SPR.write(EIP,(int)ac_pc);return Immediate16;};
-	void immediate16(signed short i) {Immediate16=i;};
-	void immediates(signed int i)
-	{
-		immediate(i);
-		immediate16(i);
-		immediate8(i);
-	};
-	uint acpc_inc;
+  Data(){};
+  ~Data(){};
+  bool usesMemory() {return UsesMemory;};
+  void usesMemory(bool aux) {UsesMemory=aux;};
+  uint reg1() {return Register1;};
+  void reg1(uint r) {Register1=r;};
+  uint reg2() {return Register2;};
+  void reg2(uint r) {Register2=r;};
+  uint address() {return Address;};
+  void address(uint a) {Address=a;};
+  unsigned char address8() {return Address8;};
+  void address8(unsigned char a) {Address8=a;};
+  uint immediate() {ac_pc+=4; SPR.write(EIP,(int)ac_pc); return Immediate;};
+  void immediate(signed int i) {Immediate=i;};
+  uint immediate8() {ac_pc+=1; SPR.write(EIP,(int)ac_pc); return Immediate8;};
+  void immediate8(signed char i) {Immediate8=i;};
+  uint immediate16() {ac_pc+=2; SPR.write(EIP,(int)ac_pc);return Immediate16;};
+  void immediate16(signed char i) {Immediate16=i;};
+  void immediates(signed int i)
+  {
+    immediate(i);
+    immediate16(i);
+    immediate8(i);
+  };
+  uint acpc_inc;
 };
 
 Data data;
@@ -883,39 +923,39 @@ int IFJustSet;
 class DataManager
 {
 public:
-	DataManager(){};
-	~DataManager(){};
-	uint getMemOrReg1()
-	{
-		if ( data.usesMemory() ) return readMemory(data.address());
-		return readRegister(data.reg1());
-	}
-	uint getMemOrReg2()
-	{
-		if ( data.usesMemory() ) return readMemory(data.address());
-		return readRegister(data.reg2());
-	}
-	uint getReg1() { return readRegister(data.reg1()); };
-	uint getReg2() { return readRegister(data.reg2()); };
-	uint getImmediate()
-	{
-		if ( OperandSize == OPERAND_SIZE16 ) return data.immediate16();
-		else if ( OperandSize == OPERAND_SIZE32 ) return data.immediate();
-		return data.immediate();
-	}
-	void setMemOrReg1(uint val)
-	{
-		if ( data.usesMemory() ) writeMemory(data.address(),val);
-		else writeRegister(data.reg1(),val);
-	}
-	void setMemOrReg2(uint val)
-	{
-		if ( data.usesMemory() ) writeMemory(data.address(),val);
-		else writeRegister(data.reg2(),val);
-	}
-	void setMem(uint val) { writeMemory(data.address(),val);}
-	void setReg1(uint val) { writeRegister(data.reg1(),val); }
-	void setReg2(uint val) { writeRegister(data.reg2(),val); }
+  DataManager(){};
+  ~DataManager(){};
+  uint getMemOrReg1()
+  {
+    if ( data.usesMemory() ) return readMemory(data.address());
+    return readRegister(data.reg1());
+  }
+  uint getMemOrReg2()
+  {
+    if ( data.usesMemory() ) return readMemory(data.address());
+    return readRegister(data.reg2());
+  }
+  uint getReg1() { return readRegister(data.reg1()); };
+  uint getReg2() { return readRegister(data.reg2()); };
+  uint getImmediate()
+  {
+    if ( OperandSize == OPERAND_SIZE16 ) return data.immediate16();
+    else if ( OperandSize == OPERAND_SIZE32 ) return data.immediate();
+    return data.immediate();
+  }
+  void setMemOrReg1(uint val)
+  {
+    if ( data.usesMemory() ) writeMemory(data.address(),val);
+    else writeRegister(data.reg1(),val);
+  }
+  void setMemOrReg2(uint val)
+  {
+    if ( data.usesMemory() ) writeMemory(data.address(),val);
+    else writeRegister(data.reg2(),val);
+  }
+  void setMem(uint val) { writeMemory(data.address(),val);}
+  void setReg1(uint val) { writeRegister(data.reg1(),val); }
+  void setReg2(uint val) { writeRegister(data.reg2(),val); }
 };
 
 DataManager dataManager;
@@ -923,123 +963,123 @@ DataManager dataManager;
 class PrintManager
 {
 public:
-	PrintManager(){};
-	~PrintManager(){};
-
-	// Instructions such as: INST REG1, ADDR
-	void printReg1Addr ( char *g16, char *g32, char *i16, char *i32 )
-	{
-		if ( OperandSize == OPERAND_SIZE16 )
-		{
-			acprintfg(g16);
-			acprintfr16m ( i16, data.reg1(), data.address() );
-		}
-		else if ( OperandSize == OPERAND_SIZE32 )
-		{
-			acprintfg(g32);
-			acprintfr32m ( i32, data.reg1(), data.address() );
-		}
-	}
-
-	// Instructions such as: INST REG1, SEL:OFFSET
-	void printReg1Addr ( char *g16, char *g32, char *i16, char *i32, uint s, uint o)
-	{
-		if ( OperandSize == OPERAND_SIZE16 )
-		{
-			acprintfg(g16);
-			acprintfr16m1616 ( i16, data.reg1(), s, o );
-		}
-		else if ( OperandSize == OPERAND_SIZE32 )
-		{
-			acprintfg(g32);
-			acprintfr32m1632 ( i32, data.reg1(), s, o );
-		}
-	}
-
-	// Instructions such as: INST REG2, MEM/REG1
-	void printReg2MReg1(char *g16, char *g32, char *i16, char *i32)
-	{
-		if ( OperandSize == OPERAND_SIZE16 )
-		{
-			acprintfg(g16);
-			if ( data.usesMemory() ) acprintfmr(i16,data.address(),data.reg1());
-			else acprintfrr(i16,data.reg2(),data.reg1());
-		}
-		else if ( OperandSize == OPERAND_SIZE32 )
-		{
-			acprintfg(g32);
-			if ( data.usesMemory() ) acprintfmr(i32,data.address(),data.reg1());
-			else acprintfrr(i32,data.reg2(),data.reg1());
-		}
-	}
-
-	void printReg1MReg2(char *g16, char *g32, char *i16, char *i32)
-	{
-		if ( OperandSize == OPERAND_SIZE16 )
-		{
-			acprintfg(g16);
-			if ( data.usesMemory()) acprintfrm(i16,data.reg1(),data.address());
-			else acprintfrr(i16,data.reg1(),data.reg2());
-		}
-		else if ( OperandSize == OPERAND_SIZE32 )
-		{
-			acprintfg(g32);
-			if ( data.usesMemory()) acprintfrm(i32,data.reg1(),data.address());
-			else acprintfrr(i32,data.reg1(),data.reg2());
-		}
-	}
-
-	// Instructions such as: INST FIXED, IMMEDIATE32
-	void printImm(char *g16, char *g32, char *i16, char *i32, uint i)
-	{
-		if ( OperandSize == OPERAND_SIZE16 )
-		{
-			acprintfg(g16);
-			acprintfi16(i16,i);
-		}
-		else if ( OperandSize == OPERAND_SIZE32 )
-		{
-			acprintfg(g32);
-			acprintfi32(i32,i);
-		}
-	}
-
-	// Instructions such as: INST REG/MEM, IMM16/32
-	void printReg2MImm(char *g16, char *g32, char *i16, char *i32, uint i )
-	{
-		if ( OperandSize == OPERAND_SIZE16 )
-		{
-			acprintfg(g16);
-			acprintfri16(i16, data.reg2(), i);
-		}
-		else if ( OperandSize == OPERAND_SIZE32 )
-		{
-			acprintfg(g32);
-			acprintfri32(i32, data.reg2(), i);
-		}
-	}
-
-	// Instructions that are independent from operand and address sizes
-	void print(char *inst)
-	{
-		acprintfg(inst);
-		acprintf(inst);acprintf("\n");
-	}
-
-	// Instructions with fix-argument type
-	void print(char *inst16, char *inst32)
-	{
-		if ( OperandSize == OPERAND_SIZE16 )
-		{
-			acprintfg(inst16);
-			acprintf(inst16);acprintf("\n");
-		}
-		else if ( OperandSize == OPERAND_SIZE32 )
-		{
-			acprintfg(inst32);
-			acprintf(inst32);acprintf("\n");
-		}
-	}
+  PrintManager(){};
+  ~PrintManager(){};
+  
+  // Instructions such as: INST REG1, ADDR
+  void printReg1Addr ( char *g16, char *g32, char *i16, char *i32 )
+  {
+    if ( OperandSize == OPERAND_SIZE16 )
+      {
+	acprintfg(g16);
+	acprintfr16m ( i16, data.reg1(), data.address() );
+      }
+    else if ( OperandSize == OPERAND_SIZE32 )
+      {
+	acprintfg(g32);
+	acprintfr32m ( i32, data.reg1(), data.address() );
+      }
+  }
+  
+  // Instructions such as: INST REG1, SEL:OFFSET
+  void printReg1Addr ( char *g16, char *g32, char *i16, char *i32, uint s, uint o)
+  {
+    if ( OperandSize == OPERAND_SIZE16 )
+      {
+	acprintfg(g16);
+	acprintfr16m1616 ( i16, data.reg1(), s, o );
+      }
+    else if ( OperandSize == OPERAND_SIZE32 )
+      {
+	acprintfg(g32);
+	acprintfr32m1632 ( i32, data.reg1(), s, o );
+      }
+  }
+  
+  // Instructions such as: INST REG2, MEM/REG1
+  void printReg2MReg1(char *g16, char *g32, char *i16, char *i32)
+  {
+    if ( OperandSize == OPERAND_SIZE16 )
+      {
+	acprintfg(g16);
+	if ( data.usesMemory() ) acprintfmr(i16,data.address(),data.reg1());
+	else acprintfrr(i16,data.reg2(),data.reg1());
+      }
+    else if ( OperandSize == OPERAND_SIZE32 )
+      {
+	acprintfg(g32);
+	if ( data.usesMemory() ) acprintfmr(i32,data.address(),data.reg1());
+	else acprintfrr(i32,data.reg2(),data.reg1());
+      }
+  }
+  
+  void printReg1MReg2(char *g16, char *g32, char *i16, char *i32)
+  {
+    if ( OperandSize == OPERAND_SIZE16 )
+      {
+	acprintfg(g16);
+	if ( data.usesMemory()) acprintfrm(i16,data.reg1(),data.address());
+	else acprintfrr(i16,data.reg1(),data.reg2());
+      }
+    else if ( OperandSize == OPERAND_SIZE32 )
+      {
+	acprintfg(g32);
+	if ( data.usesMemory()) acprintfrm(i32,data.reg1(),data.address());
+	else acprintfrr(i32,data.reg1(),data.reg2());
+      }
+  }
+  
+  // Instructions such as: INST FIXED, IMMEDIATE32
+  void printImm(char *g16, char *g32, char *i16, char *i32, uint i)
+  {
+    if ( OperandSize == OPERAND_SIZE16 )
+      {
+	acprintfg(g16);
+	acprintfi16(i16,i);
+      }
+    else if ( OperandSize == OPERAND_SIZE32 )
+      {
+	acprintfg(g32);
+	acprintfi32(i32,i);
+      }
+  }
+  
+  // Instructions such as: INST REG/MEM, IMM16/32
+  void printReg2MImm(char *g16, char *g32, char *i16, char *i32, uint i )
+  {
+    if ( OperandSize == OPERAND_SIZE16 )
+      {
+	acprintfg(g16);
+	acprintfri16(i16, data.reg2(), i);
+      }
+    else if ( OperandSize == OPERAND_SIZE32 )
+      {
+	acprintfg(g32);
+	acprintfri32(i32, data.reg2(), i);
+      }
+  }
+  
+  // Instructions that are independent from operand and address sizes
+  void print(char *inst)
+  {
+    acprintfg(inst);
+    acprintf(inst);acprintf("\n");
+  }
+  
+  // Instructions with fix-argument type
+  void print(char *inst16, char *inst32)
+  {
+    if ( OperandSize == OPERAND_SIZE16 )
+      {
+	acprintfg(inst16);
+	acprintf(inst16);acprintf("\n");
+      }
+    else if ( OperandSize == OPERAND_SIZE32 )
+      {
+	acprintfg(inst32);
+	acprintf(inst32);acprintf("\n");
+      }
+  }
 };
 
 PrintManager printManager;
@@ -1050,37 +1090,37 @@ PrintManager printManager;
 
 signed int signExtend8 ( unsigned int i )
 {
-	if ( MSB8(i) ) return (0xFFFFFF00)|(i&MASK_8BITS);
-	return i;
+  if ( MSB8(i) ) return (0xFFFFFF00)|(i&MASK_8BITS);
+  return i;
 }
 
 uint processSib(uint mod, uint sib, uint disp, uint imm, bool *used)
 {
-	uint ss = (sib>>6);
-	uint index = (sib>>3)&(0x07);
-	uint base = sib&0x07;
-	uint scaledIndex=0;
-	uint baseValue=0;
-
-	// Calculating Scaled Index
-	if ( index == 0x04 ) scaledIndex = 0;
-	else scaledIndex = GR.read(index)*((uint)pow((double)2,(double)ss));
-
-	// Calculating Base
-	if ( (base == 0x05) && (mod == 0x00) )
-	{
-		baseValue = disp;
-		data.acpc_inc+= 4;
-		ac_pc+= 4;
-		data.immediates(imm);
-		(*used)=true;
-	}
-	else
-	{
-		baseValue = GR.read(base);
-	}
-
-	return baseValue + scaledIndex;
+  uint ss = (sib>>6);
+  uint index = (sib>>3)&(0x07);
+  uint base = sib&0x07;
+  uint scaledIndex=0;
+  uint baseValue=0;
+  
+  // Calculating Scaled Index
+  if ( index == 0x04 ) scaledIndex = 0;
+  else scaledIndex = GR.read(index)*((uint)pow((double)2,(double)ss));
+  
+  // Calculating Base
+  if ( (base == 0x05) && (mod == 0x00) )
+    {
+      baseValue = disp;
+      data.acpc_inc+= 4;
+      ac_pc+= 4;
+      data.immediates(imm);
+      (*used)=true;
+    }
+  else
+    {
+      baseValue = GR.read(base);
+    }
+  
+  return baseValue + scaledIndex;
 }
 
 void processData(uint mod, uint regop, uint rm, uint sib, uint disp, uint imm)
@@ -1172,27 +1212,27 @@ void processData(uint mod, uint regop, uint rm, uint sib, uint disp, uint imm)
 //!Behavior executed before simulation begins.
 void ac_behavior( begin )
 {
-	// Segmented memory is not implemented... yet
-	SR.write(CS,0x00000000);	// Code Segment
-	SR.write(DS,0x00000000);	// Data Segment
-	SR.write(ES,0x00000000);
-	SR.write(SS,0x00000000);	// Stack Segment
-
-	// Setting Operand size attribute behavior
-	OperandSize = OPERAND_SIZE32;
-
-	// Setting Address size attribute behavior
-	AddressSize = ADDRESS_SIZE32;
-
-	// Setting Stack Pointer
-	GR.write(ESP,STACK_BOTTOM);
-
-	// Setting IF behavior flag
-	IFJustSet = NOT_SET;
-	setFlag(FLAG_IF);
-
-	// Setting OS return control (end of program)
-	push(0xCC00);
+  // Segmented memory is not implemented... yet
+  SR.write(CS,0x00000000);	// Code Segment
+  SR.write(DS,0x00000000);	// Data Segment
+  SR.write(ES,0x00000000);
+  SR.write(SS,0x00000000);	// Stack Segment
+  
+  // Setting Operand size attribute behavior
+  OperandSize = OPERAND_SIZE32;
+  
+  // Setting Address size attribute behavior
+  AddressSize = ADDRESS_SIZE32;
+  
+  // Setting Stack Pointer
+  GR.write(ESP,STACK_BOTTOM);
+  
+  // Setting IF behavior flag
+  IFJustSet = NOT_SET;
+  setFlag(FLAG_IF);
+  
+  // Setting OS return control (end of program)
+  push(0xCC00);
 };
 
 //!Behavior executed after simulation ends.
@@ -1201,157 +1241,157 @@ void ac_behavior( end ){};
 //!Generic instruction behavior method.
 void ac_behavior( instruction )
 {
-	// IF flag behavior implementation
-	if (IFJustSet == RUNONCE)
-	{
-		IFJustSet = NOT_SET;
-		setFlag(FLAG_IF);
-	}
-	if (IFJustSet == JUST_SET) IFJustSet = RUNONCE;
-	// OperandSize attribute behavior implementation
-	if (OperandSize == OPERAND_SIZE16 ) OperandSize = OPERAND_SIZE32;
-	if (OperandSize == OPERAND_SIZE16JUST ) OperandSize = OPERAND_SIZE16;
-	// AddressSize attribute behavior implementation
-	if (AddressSize == ADDRESS_SIZE16 ) AddressSize = ADDRESS_SIZE32;
-	if (AddressSize == ADDRESS_SIZE16JUST ) AddressSize = ADDRESS_SIZE16;
+  // IF flag behavior implementation
+  if (IFJustSet == RUNONCE)
+    {
+      IFJustSet = NOT_SET;
+      setFlag(FLAG_IF);
+    }
+  if (IFJustSet == JUST_SET) IFJustSet = RUNONCE;
+  // OperandSize attribute behavior implementation
+  if (OperandSize == OPERAND_SIZE16 ) OperandSize = OPERAND_SIZE32;
+  if (OperandSize == OPERAND_SIZE16JUST ) OperandSize = OPERAND_SIZE16;
+  // AddressSize attribute behavior implementation
+  if (AddressSize == ADDRESS_SIZE16 ) AddressSize = ADDRESS_SIZE32;
+  if (AddressSize == ADDRESS_SIZE16JUST ) AddressSize = ADDRESS_SIZE16;
 };
- 
+
 //! Instruction Format behavior methods.
 void ac_behavior( Type_op1b )
 {
-	ac_pc+= 1;
-	SPR.write(EIP,(int)ac_pc);
+  ac_pc+= 1;
+  SPR.write(EIP,(int)ac_pc);
 }
 void ac_behavior( Type_op2b )
 {
-	ac_pc+= 2;
-	SPR.write(EIP,(int)ac_pc);
+  ac_pc+= 2;
+  SPR.write(EIP,(int)ac_pc);
 }
 void ac_behavior( Type_op1bi )
 {
-	data.immediate(imme);
-	ac_pc+= 1;
-	SPR.write(EIP,(int)ac_pc);
+  data.immediate(imme);
+  ac_pc+= 1;
+  SPR.write(EIP,(int)ac_pc);
 }
 void ac_behavior( Type_op1bi8 )
 {
-	data.immediate8(imm8);
-	ac_pc+= 1;
-	SPR.write(EIP,(int)ac_pc);
+  data.immediate8(imm8);
+  ac_pc+= 1;
+  SPR.write(EIP,(int)ac_pc);
 }
 void ac_behavior( Type_op1bd8 )
 {
-	data.address8(disp8);
-	ac_pc+= 2;
-	SPR.write(EIP,(int)ac_pc);
+  data.address8(disp8);
+  ac_pc+= 2;
+  SPR.write(EIP,(int)ac_pc);
 }
 void ac_behavior( Type_op1bd32 )
 {
-	data.address(imme);
-	ac_pc+= 5;
-	SPR.write(EIP,(int)ac_pc);
+  data.address(imme);
+  ac_pc+= 5;
+  SPR.write(EIP,(int)ac_pc);
 }
 void ac_behavior( Type_op2bd32 )
 {
-	data.address(disp32);
-	ac_pc+= 6;
-	SPR.write(EIP,(int)ac_pc);
+  data.address(disp32);
+  ac_pc+= 6;
+  SPR.write(EIP,(int)ac_pc);
 }
 void ac_behavior( Type_op1b_rm32 )
 {
-	processData(mod,regop,rm,sib,disp,imm);
-	ac_pc+=1;
-	SPR.write(EIP,(int)ac_pc);
+  processData(mod,regop,rm,sib,disp,imm);
+  ac_pc+=1;
+  SPR.write(EIP,(int)ac_pc);
 }
 void ac_behavior( Type_op2b_rm32 )
 {
-	processData(mod2,regop2,rm2,sib2,disp2,imm2);
-	ac_pc+=2;
-	SPR.write(EIP,(int)ac_pc);
+  processData(mod2,regop2,rm2,sib2,disp2,imm2);
+  ac_pc+=2;
+  SPR.write(EIP,(int)ac_pc);
 }
 void ac_behavior( Type_op2b_debug )
 {
-	if ( op2b==0xAAAA )
-		ac_pc+= 10;
-	else if ( op2b==0xDD00 )
-		ac_pc+= 2;
-	else if ( op2b==0xCC00 )
-		ac_pc+= 2;
-	SPR.write(EIP,(int)ac_pc);
+  if ( op2b==0xAAAA )
+    ac_pc+= 10;
+  else if ( op2b==0xDD00 )
+    ac_pc+= 2;
+  else if ( op2b==0xCC00 )
+    ac_pc+= 2;
+  SPR.write(EIP,(int)ac_pc);
 }
- 
+
 //!Instruction insd behavior method.
 void ac_behavior( insd )
 {
-	printManager.print ( "INSD <Not implemented>" );
-	// Input/Output not available
+  printManager.print ( "INSD <Not implemented>" );
+  // Input/Output not available
 }
 
 //!Instruction outsd behavior method.
 void ac_behavior( outsd )
 {
-	printManager.print ( "OUTSD <Not implemented>" );
-	// Input/Output not available
+  printManager.print ( "OUTSD <Not implemented>" );
+  // Input/Output not available
 }
 
 // Debug ok
 //!Instruction stc behavior method.
 void ac_behavior( stc )
 {
-	printManager.print ( "STC" );
-	setFlag(FLAG_CF);
+  printManager.print ( "STC" );
+  setFlag(FLAG_CF);
 }
 
 // Debug ok
 //!Instruction clc behavior method.
 void ac_behavior( clc )
 {
-	printManager.print ( "CLC" );
-	resetFlag(FLAG_CF);
+  printManager.print ( "CLC" );
+  resetFlag(FLAG_CF);
 }
 
 // Debug ok
 //!Instruction cmc behavior method.
 void ac_behavior( cmc )
 {
-	printManager.print ( "CMC" );
-	compFlag(FLAG_CF);
+  printManager.print ( "CMC" );
+  compFlag(FLAG_CF);
 }
 
 // Debug ok
 //!Instruction cld behavior method.
 void ac_behavior( cld )
 {
-	printManager.print ( "CLD" );
-	resetFlag(FLAG_DF);
+  printManager.print ( "CLD" );
+  resetFlag(FLAG_DF);
 }
 
 // Debug ok
 //!Instruction std behavior method.
 void ac_behavior( std )
 {
-	printManager.print ( "STD" );
-	setFlag(FLAG_DF);
+  printManager.print ( "STD" );
+  setFlag(FLAG_DF);
 }
 
 //!Instruction lahf behavior method.
 void ac_behavior( lahf )
 {
-	printManager.print ( "LAHF <Not implemented>" );
+  printManager.print ( "LAHF <Not implemented>" );
 }
 
 //!Instruction sahf behavior method.
 void ac_behavior( sahf )
 {
-	printManager.print ( "SAHF <Not implemented>" );
+  printManager.print ( "SAHF <Not implemented>" );
 }
 
 // Debug 16/32 ok
 //!Instruction pushfd behavior method.
 void ac_behavior( pushfd )
 {
-	printManager.print("PUSHF", "PUSHFD");
-	push(readSPRegister(EFLAGS));
+  printManager.print("PUSHF", "PUSHFD");
+  push(readSPRegister(EFLAGS));
 }
 
 // Debug 16/32 ok
@@ -1629,35 +1669,29 @@ void ac_behavior( out_DX_EAX )
 //!Instruction cwd_cwq behavior method.
 void ac_behavior( cwd_cwq )
 {
-	printf ( "CWD/CDQ\n" );
-	if ( OperandSize == OPERAND_SIZE16 )
-	{
-		if ( MSB16(readRegister(EAX)) ) writeRegister(EDX,0xFFFF);
-		else writeRegister(EDX,0);
-	}
-	else if ( OperandSize == OPERAND_SIZE32 )
-	{
-		if ( MSB32(readRegister(EAX)) ) writeRegister(EDX,0xFFFFFFFF);
-		else writeRegister(EDX,0);
-	}
-}
-
-//!Instruction cbw_cwde behavior method.
-void ac_behavior( cbw_cwde )
-{
-	acprintf ( " CWDE <Not implemented>\n" );
+  printf ( "CWD/CDQ\n" );
+  if ( OperandSize == OPERAND_SIZE16 )
+    {
+      if ( MSB16(readRegister(EAX)) ) writeRegister(EDX,0xFFFF);
+      else writeRegister(EDX,0);
+    }
+  else if ( OperandSize == OPERAND_SIZE32 )
+    {
+      if ( MSB32(readRegister(EAX)) ) writeRegister(EDX,0xFFFFFFFF);
+      else writeRegister(EDX,0);
+    }
 }
 
 // Debug ok
 //!Instruction inc_EAX behavior method.
 void ac_behavior( inc_EAX )
 {
-	printManager.print ( "INC AX", "INC EAX" );
-	uint op1 = readRegister(EAX);
-	uint op2 = 1;
-	uint res = op1 + op2;
-	writeRegister(EAX, res );
-	checkFlags(OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+  printManager.print ( "INC AX", "INC EAX" );
+  uint op1 = readRegister(EAX);
+  uint op2 = 1;
+  uint res = op1 + op2;
+  writeRegister(EAX, res );
+  checkFlags(OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1748,12 +1782,12 @@ void ac_behavior( inc_EDI )
 //!Instruction dec_EAX behavior method.
 void ac_behavior( dec_EAX )
 {
-	printManager.print ( "DEC AX", "DEC EAX" );
-	uint op1 = readRegister(EAX);
-	uint op2 = 1;
-	uint res = op1 - op2;
-	writeRegister(EAX, res);
-	checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+  printManager.print ( "DEC AX", "DEC EAX" );
+  uint op1 = readRegister(EAX);
+  uint op2 = 1;
+  uint res = op1 - op2;
+  writeRegister(EAX, res);
+  checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1840,15 +1874,7 @@ void ac_behavior( dec_EDI )
 	checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
-//!Instruction daa behavior method.
-void ac_behavior( daa ){
-	acprintf ( " DAA <Not implemented>\n" );
-}
 
-//!Instruction das behavior method.
-void ac_behavior( das ){
-	acprintf ( " DAA <Not implemented>\n" );
-}
 
 
 
@@ -1886,24 +1912,24 @@ void ac_behavior( movs_m32_m32 ){
 
 //!Instruction cmps_m32_m32 behavior method.
 void ac_behavior( cmps_m32_m32 ){
-	acprintf ( " CMPS M32 M32\n" );
-
-	uint add_src1 = SR.read(DS)+GR.read(ESI);
-	uint add_src2 = SR.read(ES)+GR.read(EDI);
-	uint df = SPR.read(EFLAGS)&(~FLAG_DF);	
-
-	uint op1 = MEM.read(add_src1);
-	uint op2 = MEM.read(add_src2);
-	uint temp = op1 - op2;
-	checkFlags(OPER_SUB, op1, op2, temp,FLAG_ALL);
-	
-	if (df == 0) {
-		GR.write(ESI,GR.read(ESI)+4);
-		GR.write(EDI,GR.read(EDI)+4);
-	} else {
-		GR.write(ESI,GR.read(ESI)-4);
-		GR.write(EDI,GR.read(EDI)-4);
-	}
+  acprintf ( " CMPS M32 M32\n" );
+  
+  uint add_src1 = SR.read(DS)+GR.read(ESI);
+  uint add_src2 = SR.read(ES)+GR.read(EDI);
+  uint df = SPR.read(EFLAGS)&(~FLAG_DF);	
+  
+  uint op1 = MEM.read(add_src1);
+  uint op2 = MEM.read(add_src2);
+  uint temp = op1 - op2;
+  checkFlags(OPER_SUB, op1, op2, temp,FLAG_ALL);
+  
+  if (df == 0) {
+    GR.write(ESI,GR.read(ESI)+4);
+    GR.write(EDI,GR.read(EDI)+4);
+  } else {
+    GR.write(ESI,GR.read(ESI)-4);
+    GR.write(EDI,GR.read(EDI)-4);
+  }
 }
 
 //!Instruction scas_m32 behavior method.
@@ -2128,80 +2154,82 @@ void ac_behavior( mov_rm32_r32 )
 //!Instruction mov_r32_rm32 behavior method.
 void ac_behavior( mov_r32_rm32 )
 {
-	printManager.printReg1MReg2("MOV R16, RM16","MOV R32, RM32","MOV","MOV");
-	dataManager.setReg1(dataManager.getMemOrReg2());
+  printManager.printReg1MReg2("MOV R16, RM16","MOV R32, RM32","MOV","MOV");
+  dataManager.setReg1(dataManager.getMemOrReg2());
 }
 
 //!Instruction mov_EAX_imm32 behavior method.
 void ac_behavior( mov_EAX_imm32 )
 {
-	uint i = dataManager.getImmediate();
-	printManager.printImm("MOV AX, IMM16","MOV EAX, IMM32","MOV AX,","MOV EAX,",i);
-	writeRegister(EAX, i);
+  uint i = dataManager.getImmediate();
+  //printf("NO AX:%i\n",i);
+  printManager.printImm("MOV AX, IMM16","MOV EAX, IMM32","MOV AX,","MOV EAX,",i);
+   //GR[AX] = i;
+  writeRegister(EAX, i);
 }
 
 //!Instruction mov_ECX_imm32 behavior method.
 void ac_behavior( mov_ECX_imm32 )
 {
-	uint i = dataManager.getImmediate();
-	printManager.printImm("MOV CX, IMM16","MOV ECX, IMM32","MOV CX,","MOV ECX,",i);
-	writeRegister(ECX, i);
+  uint i = dataManager.getImmediate();
+  printManager.printImm("MOV CX, IMM16","MOV ECX, IMM32","MOV CX,","MOV ECX,",i);
+  writeRegister(ECX, i);
 }
 
 //!Instruction mov_EDX_imm32 behavior method.
 void ac_behavior( mov_EDX_imm32 )
 {
-	uint i = dataManager.getImmediate();
-	printManager.printImm("MOV DX, IMM16","MOV EDX, IMM32","MOV DX,","MOV EDX,",i);
-	writeRegister(EDX, i);
+  uint i = dataManager.getImmediate();
+  printManager.printImm("MOV DX, IMM16","MOV EDX, IMM32","MOV DX,","MOV EDX,",i);
+  writeRegister(EDX, i);
 }
 
 //!Instruction mov_EBX_imm32 behavior method.
 void ac_behavior( mov_EBX_imm32 )
 {
-	uint i = dataManager.getImmediate();
-	printManager.printImm("MOV BX, IMM16","MOV EBX, IMM32","MOV BX,","MOV EBX,",i);
-	writeRegister(EBX, i);
+  uint i = dataManager.getImmediate();
+  printManager.printImm("MOV BX, IMM16","MOV EBX, IMM32","MOV BX,","MOV EBX,",i);
+  writeRegister(EBX, i);
 }
 
 //!Instruction mov_ESP_imm32 behavior method.
 void ac_behavior( mov_ESP_imm32 )
 {
-	uint i = dataManager.getImmediate();
-	printManager.printImm("MOV SP, IMM16","MOV ESP, IMM32","MOV SP,","MOV ESP,",i);
-	writeRegister(ESP, i);
+  uint i = dataManager.getImmediate();
+  printManager.printImm("MOV SP, IMM16","MOV ESP, IMM32","MOV SP,","MOV ESP,",i);
+  writeRegister(ESP, i);
 }
 
 //!Instruction mov_EBP_imm32 behavior method.
 void ac_behavior( mov_EBP_imm32 )
 {
-	uint i = dataManager.getImmediate();
-	printManager.printImm("MOV BP, IMM16","MOV EBP, IMM32","MOV BP,","MOV EBP,",i);
-	writeRegister(EBP, i);
+  uint i = dataManager.getImmediate();
+  printManager.printImm("MOV BP, IMM16","MOV EBP, IMM32","MOV BP,","MOV EBP,",i);
+  writeRegister(EBP, i);
 }
 
 //!Instruction mov_ESI_imm32 behavior method.
 void ac_behavior( mov_ESI_imm32 )
 {
-	uint i = dataManager.getImmediate();
-	printManager.printImm("MOV SI, IMM16","MOV ESI, IMM32","MOV SI,","MOV ESI,",i);
-	writeRegister(ESI, i);
+  uint i = dataManager.getImmediate();
+  printManager.printImm("MOV SI, IMM16","MOV ESI, IMM32","MOV SI,","MOV ESI,",i);
+  writeRegister(ESI, i);
 }
 
 //!Instruction mov_EDI_imm32 behavior method.
 void ac_behavior( mov_EDI_imm32 )
 {
-	uint i = dataManager.getImmediate();
-	printManager.printImm("MOV DI, IMM16","MOV EDI, IMM32","MOV DI,","MOV EDI,",i);
-	writeRegister(EDI, i);
+  uint i = dataManager.getImmediate();
+  printManager.printImm("MOV DI, IMM16","MOV EDI, IMM32","MOV DI,","MOV EDI,",i);
+  writeRegister(EDI, i);
 }
 
 //!Instruction mov_rm32_imm32 behavior method.
 void ac_behavior( mov_rm32_imm32 )
 {
-	uint i = dataManager.getImmediate();
-	printManager.printReg2MImm("MOV RM16, IMM16","MOV RM32, IMM32","MOV","MOV",i);
-	dataManager.setMemOrReg2(i);
+  uint i = dataManager.getImmediate();
+  printManager.printReg2MImm("MOV RM16, IMM16","MOV RM32, IMM32","MOV","MOV",i);
+  dataManager.setMemOrReg2(i);
 }
 
 //!Instruction xchg_EAX_r32 behavior method.
@@ -2210,19 +2238,19 @@ void ac_behavior( mov_rm32_imm32 )
 //!Instruction xchg_ECX_r32 behavior method.
 void ac_behavior( xchg_EAX_ECX )
 {
-	acprintf ( "XCHG EAX, ECX\n" );
-	uint aux = readRegister(EAX);
-	writeRegister(EAX, readRegister(ECX));
-	writeRegister(ECX, aux);
+  acprintf ( "XCHG EAX, ECX\n" );
+  uint aux = readRegister(EAX);
+  writeRegister(EAX, readRegister(ECX));
+  writeRegister(ECX, aux);
 }
 
 //!Instruction xchg_EDX_r32 behavior method.
 void ac_behavior( xchg_EAX_EDX )
 {
-	acprintf ( "XCHG EAX, EDX\n" );
-        uint aux = readRegister(EAX);
-        writeRegister(EAX, readRegister(EDX));
-        writeRegister(EDX, aux);
+  acprintf ( "XCHG EAX, EDX\n" );
+  uint aux = readRegister(EAX);
+  writeRegister(EAX, readRegister(EDX));
+  writeRegister(EDX, aux);
 }
 
 //!Instruction xchg_EBX_r32 behavior method.
@@ -2503,8 +2531,8 @@ void ac_behavior( sub_rm32_r32 )
 	if ( data.usesMemory() ) printf ( "[0x%08X], ", data.address() );
 	else
 	{
-		if ( OperandSize == OPERAND_SIZE16 ) printf ( "%s, ", reg_str16[data.reg2()] );
-		else printf ( "%s, ", reg_str[data.reg2()] );
+	  if ( OperandSize == OPERAND_SIZE16 ) printf ( "%s, ", reg_str16[data.reg2()] );
+	  else printf ( "%s, ", reg_str[data.reg2()] );
 	}
 	op1 = dataManager.getMemOrReg2();
 	op2 = dataManager.getReg1();
@@ -3305,125 +3333,125 @@ void ac_behavior( enter_imm16_0_1_imm8 )
 //!Instruction lss_r32_m16_32 behavior method.
 void ac_behavior( lss_r32_m16_32 )
 {
-	acprintf ( "LSS R32, M16:32\n" );
-        unsigned char b0 = MEM.read_byte(data.address());
-        unsigned char b1 = MEM.read_byte(data.address()+1);
-        uint offset = readMemory(data.address()+2);
-        uint ds_data = (b1<<8) + b0;
-        writeSRegister(SS, ds_data);
-        writeRegister(data.reg1(), offset);
+  acprintf ( "LSS R32, M16:32\n" );
+  unsigned char b0 = MEM.read_byte(data.address());
+  unsigned char b1 = MEM.read_byte(data.address()+1);
+  uint offset = readMemory(data.address()+2);
+  uint ds_data = (b1<<8) + b0;
+  writeSRegister(SS, ds_data);
+  writeRegister(data.reg1(), offset);
 }
 
 //!Instruction lfs_r32_m16_32 behavior method.
 void ac_behavior( lfs_r32_m16_32 )
 {
-	acprintf ( "LFS R32,M16:32\n" );
-        unsigned char b0 = MEM.read_byte(data.address());
-        unsigned char b1 = MEM.read_byte(data.address()+1);
-        uint offset = readMemory(data.address()+2);
-        uint ds_data = (b1<<8) + b0;
-        writeSRegister(FS, ds_data);
-        writeRegister(data.reg1(), offset);
+  acprintf ( "LFS R32,M16:32\n" );
+  unsigned char b0 = MEM.read_byte(data.address());
+  unsigned char b1 = MEM.read_byte(data.address()+1);
+  uint offset = readMemory(data.address()+2);
+  uint ds_data = (b1<<8) + b0;
+  writeSRegister(FS, ds_data);
+  writeRegister(data.reg1(), offset);
 }
 
 //!Instruction lgs_r32_m16_32 behavior method.
 void ac_behavior( lgs_r32_m16_32 )
 {
-	acprintf ( "LGS R32,M16:32\n" );
-        unsigned char b0 = MEM.read_byte(data.address());
-        unsigned char b1 = MEM.read_byte(data.address()+1);
-        uint offset = readMemory(data.address()+2);
-        uint ds_data = (b1<<8) + b0;
-        writeSRegister(GS, ds_data);
-        writeRegister(data.reg1(), offset);
+  acprintf ( "LGS R32,M16:32\n" );
+  unsigned char b0 = MEM.read_byte(data.address());
+  unsigned char b1 = MEM.read_byte(data.address()+1);
+  uint offset = readMemory(data.address()+2);
+  uint ds_data = (b1<<8) + b0;
+  writeSRegister(GS, ds_data);
+  writeRegister(data.reg1(), offset);
 }
 
 //!Instruction cmov_a_nbe_r32_rm32 behavior method.
 void ac_behavior( cmov_a_nbe_r32_rm32 )
 {
-	acprintf ( "CMOVA/CMOVNBE R32, RM32\n" );
-	if ( (testFlag(FLAG_CF)==false) && (testFlag(FLAG_ZF)==false) )
-	{
-		if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-		else writeRegister(data.reg1(), readRegister(data.reg2()));
-	}
+  acprintf ( "CMOVA/CMOVNBE R32, RM32\n" );
+  if ( (testFlag(FLAG_CF)==false) && (testFlag(FLAG_ZF)==false) )
+    {
+      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
+      else writeRegister(data.reg1(), readRegister(data.reg2()));
+    }
 }
 
 //!Instruction cmov_ae_nb_nc_r32_rm32 behavior method.
 void ac_behavior( cmov_ae_nb_nc_r32_rm32 )
 {
-	acprintf ( "CMOVAE/CMOVNB/CMOVNC R32, RM32\n" );
-	if ( testFlag(FLAG_CF)==false )
-	{
-		if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-		else writeRegister(data.reg1(), readRegister(data.reg2()));
-	}
+  acprintf ( "CMOVAE/CMOVNB/CMOVNC R32, RM32\n" );
+  if ( testFlag(FLAG_CF)==false )
+    {
+      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
+      else writeRegister(data.reg1(), readRegister(data.reg2()));
+    }
 }
 
 //!Instruction cmov_b_c_nae_r32_rm32 behavior method.
 void ac_behavior( cmov_b_c_nae_r32_rm32 )
 {
-	acprintf ( "CMOVB/CMOVC/CMOVNAE R32, RM32\n" );
-	if ( testFlag(FLAG_CF)==true )
-	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
-	}
+  acprintf ( "CMOVB/CMOVC/CMOVNAE R32, RM32\n" );
+  if ( testFlag(FLAG_CF)==true )
+    {
+      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
+      else writeRegister(data.reg1(), readRegister(data.reg2()));
+    }
 }
 
 //!Instruction cmov_be_na_r32_rm32 behavior method.
 void ac_behavior( cmov_be_na_r32_rm32 )
 {
-	acprintf ( "CMOVBE/CMOVNA R32, RM32\n" );
-	if ( testFlag(FLAG_CF)==true && testFlag(FLAG_ZF)==true )
-	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
-	}
+  acprintf ( "CMOVBE/CMOVNA R32, RM32\n" );
+  if ( testFlag(FLAG_CF)==true && testFlag(FLAG_ZF)==true )
+    {
+      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
+      else writeRegister(data.reg1(), readRegister(data.reg2()));
+    }
 }
 
 //!Instruction cmov_e_z_r32_rm32 behavior method.
 void ac_behavior( cmov_e_z_r32_rm32 )
 {
-	acprintf ( "CMOVE/CMOVZ R32, RM32\n" );
-	if ( testFlag(FLAG_ZF)==true )
-	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
-	}
+  acprintf ( "CMOVE/CMOVZ R32, RM32\n" );
+  if ( testFlag(FLAG_ZF)==true )
+    {
+      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
+      else writeRegister(data.reg1(), readRegister(data.reg2()));
+    }
 }
 
 //!Instruction cmov_g_nle_r32_rm32 behavior method.
 void ac_behavior( cmov_g_nle_r32_rm32 )
 {
-	acprintf ( "CMOVG/CMOVNLE R32, RM32\n" );
-	if ( testFlag(FLAG_ZF)==false && (testFlag(FLAG_SF)==testFlag(FLAG_OF)) )
-	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
-	}
+  acprintf ( "CMOVG/CMOVNLE R32, RM32\n" );
+  if ( testFlag(FLAG_ZF)==false && (testFlag(FLAG_SF)==testFlag(FLAG_OF)) )
+    {
+      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
+      else writeRegister(data.reg1(), readRegister(data.reg2()));
+    }
 }
 
 //!Instruction cmov_ge_nl_r32_rm32 behavior method.
 void ac_behavior( cmov_ge_nl_r32_rm32 )
 {
-	acprintf ( "CMOVGE/CMOVNL R32, RM32\n" );
-	if ( testFlag(FLAG_SF)==testFlag(FLAG_OF) )
-	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
-	}
+  acprintf ( "CMOVGE/CMOVNL R32, RM32\n" );
+  if ( testFlag(FLAG_SF)==testFlag(FLAG_OF) )
+    {
+      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
+      else writeRegister(data.reg1(), readRegister(data.reg2()));
+    }
 }
 
 //!Instruction cmov_l_nge_r32_rm32 behavior method.
 void ac_behavior( cmov_l_nge_r32_rm32 )
 {
-	acprintf ( "CMOVL/CMOVNGE R32, RM32\n" );
-	if ( testFlag(FLAG_SF)!=testFlag(FLAG_OF) )
-	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
-	}
+  acprintf ( "CMOVL/CMOVNGE R32, RM32\n" );
+  if ( testFlag(FLAG_SF)!=testFlag(FLAG_OF) )
+    {
+      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
+      else writeRegister(data.reg1(), readRegister(data.reg2()));
+    }
 }
 
 //!Instruction cmov_le_ng_r32_rm32 behavior method.
@@ -3837,127 +3865,127 @@ void ac_behavior( seta_setnbe_rm8 )
 	acprintf ( " SETA/SETNBE RM8 <Not implemented>\n" );
 }
 
-	//!Instruction setae_setnb_setnc_rm8 behavior method.
-	void ac_behavior( setae_setnb_setnc_rm8 )
-	{
-		acprintf ( "SETAE/SETNB/SETNC RM8\n" );
-		if ( testFlag(FLAG_CF)==false )
-		{
-			if ( data.usesMemory() ) MEM.write_byte(data.address(),1);
-			else writeRegister8(data.reg2(),1);
-		}
-		else
-		{
-			if ( data.usesMemory() ) MEM.write_byte(data.address(),0);
-			else writeRegister8(data.reg2(),0);
-		}
-	}
+//!Instruction setae_setnb_setnc_rm8 behavior method.
+void ac_behavior( setae_setnb_setnc_rm8 )
+{
+  acprintf ( "SETAE/SETNB/SETNC RM8\n" );
+  if ( testFlag(FLAG_CF)==false )
+    {
+      if ( data.usesMemory() ) MEM.write_byte(data.address(),1);
+      else writeRegister8(data.reg2(),1);
+    }
+  else
+    {
+      if ( data.usesMemory() ) MEM.write_byte(data.address(),0);
+      else writeRegister8(data.reg2(),0);
+    }
+}
 
-	//!Instruction setb_setc_setnae_rm8 behavior method.
-	void ac_behavior( setb_setc_setnae_rm8 )
-	{
-		acprintf ( " SETB/SETC/SETNAE RM8 <Not implemented>\n" );
-	}
+//!Instruction setb_setc_setnae_rm8 behavior method.
+void ac_behavior( setb_setc_setnae_rm8 )
+{
+  acprintf ( " SETB/SETC/SETNAE RM8 <Not implemented>\n" );
+}
 
-	//!Instruction setbe_setna_rm8 behavior method.
-	void ac_behavior( setbe_setna_rm8 )
-	{
-		acprintf ( " SETBE/SETNA RM8 <Not implemented>\n" );
-	}
+//!Instruction setbe_setna_rm8 behavior method.
+void ac_behavior( setbe_setna_rm8 )
+{
+  acprintf ( " SETBE/SETNA RM8 <Not implemented>\n" );
+}
 
-	//!Instruction sete_setz_rm8 behavior method.
-	void ac_behavior( sete_setz_rm8 )
-	{
-		acprintf ( " SETE/SETZ RM8 <Not implemented>\n" );
-	}
+//!Instruction sete_setz_rm8 behavior method.
+void ac_behavior( sete_setz_rm8 )
+{
+  acprintf ( " SETE/SETZ RM8 <Not implemented>\n" );
+}
 
-	//!Instruction setg_setnle_rm8 behavior method.
-	void ac_behavior( setg_setnle_rm8 )
-	{
-		acprintf ( " SETG/SETNLE RM8 <Not implemented>\n" );
-	}
+//!Instruction setg_setnle_rm8 behavior method.
+void ac_behavior( setg_setnle_rm8 )
+{
+  acprintf ( " SETG/SETNLE RM8 <Not implemented>\n" );
+}
 
-	//!Instruction setge_setnl_rm8 behavior method.
-	void ac_behavior( setge_setnl_rm8 )
-	{
-		acprintf ( " SETGE/SETNL RM8 <Not implemented>\n" );
-	}
+//!Instruction setge_setnl_rm8 behavior method.
+void ac_behavior( setge_setnl_rm8 )
+{
+  acprintf ( " SETGE/SETNL RM8 <Not implemented>\n" );
+}
 
-	//!Instruction setl_setnge_rm8 behavior method.
-	void ac_behavior( setl_setnge_rm8 )
-	{
-		acprintf ( " SETL/SETNGE RM8 <Not implemented>\n" );
-	}
+//!Instruction setl_setnge_rm8 behavior method.
+void ac_behavior( setl_setnge_rm8 )
+{
+  acprintf ( " SETL/SETNGE RM8 <Not implemented>\n" );
+}
 
-	//!Instruction setle_setng_rm8 behavior method.
-	void ac_behavior( setle_setng_rm8 )
-	{
-		acprintf ( " SETLE/SETNG RM8 <Not implemented>\n" );
-	}
+//!Instruction setle_setng_rm8 behavior method.
+void ac_behavior( setle_setng_rm8 )
+{
+  acprintf ( " SETLE/SETNG RM8 <Not implemented>\n" );
+}
 
-	//!Instruction setne_setnz_rm8 behavior method.
-	void ac_behavior( setne_setnz_rm8 )
-	{
-		acprintf ( " SETNE/SETNZ RM8 <Not implemented>\n" );
-	}
+//!Instruction setne_setnz_rm8 behavior method.
+void ac_behavior( setne_setnz_rm8 )
+{
+  acprintf ( " SETNE/SETNZ RM8 <Not implemented>\n" );
+}
 
-	//!Instruction setno_rm8 behavior method.
-	void ac_behavior( setno_rm8 )
-	{
-		acprintf ( " SETNO RM8 <Not implemented>\n" );
-	}
+//!Instruction setno_rm8 behavior method.
+void ac_behavior( setno_rm8 )
+{
+  acprintf ( " SETNO RM8 <Not implemented>\n" );
+}
 
-	//!Instruction setnp_setpo_rm8 behavior method.
-	void ac_behavior( setnp_setpo_rm8 )
-	{
-		acprintf ( " SETNP/SETPO RM8 <Not implemented>\n" );
-	}
+//!Instruction setnp_setpo_rm8 behavior method.
+void ac_behavior( setnp_setpo_rm8 )
+{
+  acprintf ( " SETNP/SETPO RM8 <Not implemented>\n" );
+}
 
-	//!Instruction setns_rm8 behavior method.
-	void ac_behavior( setns_rm8 )
-	{
-		acprintf ( " SETNS RM8 <Not implemented>\n" );
-	}
+//!Instruction setns_rm8 behavior method.
+void ac_behavior( setns_rm8 )
+{
+  acprintf ( " SETNS RM8 <Not implemented>\n" );
+}
 
-	//!Instruction seto_rm8 behavior method.
-	void ac_behavior( seto_rm8 )
-	{
-		acprintf ( " SETO RM8 <Not implemented>\n" );
-	}
+//!Instruction seto_rm8 behavior method.
+void ac_behavior( seto_rm8 )
+{
+  acprintf ( " SETO RM8 <Not implemented>\n" );
+}
 
-	//!Instruction setp_setpe_rm8 behavior method.
-	void ac_behavior( setp_setpe_rm8 )
-	{
-		acprintf ( " SETP/SETPE RM8 <Not implemented>\n" );
-	}
+//!Instruction setp_setpe_rm8 behavior method.
+void ac_behavior( setp_setpe_rm8 )
+{
+  acprintf ( " SETP/SETPE RM8 <Not implemented>\n" );
+}
 
-	//!Instruction sets_rm8 behavior method.
-	void ac_behavior( sets_rm8 )
-	{
-		acprintf ( " SETS RM8 <Not implemented>\n" );
-	}
+//!Instruction sets_rm8 behavior method.
+void ac_behavior( sets_rm8 )
+{
+  acprintf ( " SETS RM8 <Not implemented>\n" );
+}
 
-	//!Instruction ja_jnbe_rel16_32 behavior method.
-	void ac_behavior( ja_jnbe_rel16_32 )
-	{
-		acprintf ( " JA/JNBE REL32\n" );
-		if ( testFlag(FLAG_CF)==false && testFlag(FLAG_ZF)==false )
-		{
-			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
-			else ac_pc+= data.address();
-		}
-	}
+//!Instruction ja_jnbe_rel16_32 behavior method.
+void ac_behavior( ja_jnbe_rel16_32 )
+{
+  acprintf ( " JA/JNBE REL32\n" );
+  if ( testFlag(FLAG_CF)==false && testFlag(FLAG_ZF)==false )
+    {
+      if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
+      else ac_pc+= data.address();
+    }
+}
 
-	//!Instruction jae_jnb_jnc_rel16_32 behavior method.
-	void ac_behavior( jae_jnb_jnc_rel16_32 )
-	{
-		acprintf ( " JAE/JNB/JNC REL32\n" );
-		if ( testFlag(FLAG_CF)==false )
-		{
-			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
-			else ac_pc+= data.address();
-		}
-	}
+//!Instruction jae_jnb_jnc_rel16_32 behavior method.
+void ac_behavior( jae_jnb_jnc_rel16_32 )
+{
+  acprintf ( " JAE/JNB/JNC REL32\n" );
+  if ( testFlag(FLAG_CF)==false )
+    {
+      if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
+      else ac_pc+= data.address();
+    }
+}
 
 	//!Instruction jb_jc_jnae_rel16_32 behavior method.
 	void ac_behavior( jb_jc_jnae_rel16_32 )
@@ -4070,261 +4098,261 @@ void ac_behavior( seta_setnbe_rm8 )
 	}
 
 	//!Instruction jns_rel16_32 behavior method.
-	void ac_behavior( jns_rel16_32 )
-	{
-		acprintf ( " JNS REL32\n" );
-		if ( testFlag(FLAG_SF)==false )
-		{
-			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
-			else ac_pc+= data.address();
-		}
-	}
+void ac_behavior( jns_rel16_32 )
+{
+  acprintf ( " JNS REL32\n" );
+  if ( testFlag(FLAG_SF)==false )
+    {
+      if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
+      else ac_pc+= data.address();
+    }
+}
 
-	//!Instruction jo_rel16_32 behavior method.
-	void ac_behavior( jo_rel16_32 )
-	{
-		acprintf ( " JO REL32\n" );
-		if ( testFlag(FLAG_OF)==true )
-		{
-			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
-			else ac_pc+= data.address();
-		}
-	}
+//!Instruction jo_rel16_32 behavior method.
+void ac_behavior( jo_rel16_32 )
+{
+  acprintf ( " JO REL32\n" );
+  if ( testFlag(FLAG_OF)==true )
+    {
+      if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
+      else ac_pc+= data.address();
+    }
+}
 
-	//!Instruction jp_jpe_rel16_32 behavior method.
-	void ac_behavior( jp_jpe_rel16_32 )
-	{
-		acprintf ( " JP/JPE REL32\n" );
-		if ( testFlag(FLAG_PF)==true )
-		{
-			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
-			else ac_pc+= data.address();
-		}
-	}
+//!Instruction jp_jpe_rel16_32 behavior method.
+void ac_behavior( jp_jpe_rel16_32 )
+{
+  acprintf ( " JP/JPE REL32\n" );
+  if ( testFlag(FLAG_PF)==true )
+    {
+      if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
+      else ac_pc+= data.address();
+    }
+}
 
-	//!Instruction js_rel16_32 behavior method.
-	void ac_behavior( js_rel16_32 )
-	{
-		acprintf ( " JS REL32\n" );
-		if ( testFlag(FLAG_SF)==true )
-		{
-			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
-			else ac_pc+= data.address();
-		}
-	}
+//!Instruction js_rel16_32 behavior method.
+void ac_behavior( js_rel16_32 )
+{
+  acprintf ( " JS REL32\n" );
+  if ( testFlag(FLAG_SF)==true )
+    {
+      if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
+      else ac_pc+= data.address();
+    }
+}
 
-	//!Instruction bts_rm32_imm8 behavior method
-	void ac_behavior( bts_rm32_imm8 )
-	{
-		acprintf ( " BTS RM32, IMM8\n" );
-		signed char i = data.immediate8();
-		int op = i;
-		uint target;
-		acprintf ( " BTS RM32,R32\n" );
-		if ( data.usesMemory() )
-		{
-			if ( testMemBit(data.address(),op) ) setFlag ( FLAG_CF );
-			else resetFlag ( FLAG_CF );
-			setMemBit ( data.address(), op );
-		}
-		else
-		{
-			target = GR.read(data.reg2());
-			if ( testBit ( target, op ) ) setFlag(FLAG_CF);
-			else resetFlag ( FLAG_CF );
-			setBit ( &target, op );
-			GR.write(data.reg2(),target);
-		}
-	}
+//!Instruction bts_rm32_imm8 behavior method
+void ac_behavior( bts_rm32_imm8 )
+{
+  acprintf ( " BTS RM32, IMM8\n" );
+  signed char i = data.immediate8();
+  int op = i;
+  uint target;
+  acprintf ( " BTS RM32,R32\n" );
+  if ( data.usesMemory() )
+    {
+      if ( testMemBit(data.address(),op) ) setFlag ( FLAG_CF );
+      else resetFlag ( FLAG_CF );
+      setMemBit ( data.address(), op );
+    }
+  else
+    {
+      target = GR.read(data.reg2());
+      if ( testBit ( target, op ) ) setFlag(FLAG_CF);
+      else resetFlag ( FLAG_CF );
+      setBit ( &target, op );
+      GR.write(data.reg2(),target);
+    }
+}
 
-	//!Instruction btr_rm32_imm8 behavior method
-	void ac_behavior( btr_rm32_imm8 )
-	{
-		acprintf ( " BTR RM32, IMM8\n" );
-		signed char i = data.immediate8();
-		int op = i;
-		uint target;
-		if ( data.usesMemory() )
-		{
-			if ( testMemBit(data.address(),op) ) setFlag ( FLAG_CF );
-			else resetFlag ( FLAG_CF );
-			resetMemBit ( data.address(), op );
-		}
-		else
-		{
-			target = GR.read(data.reg2());
-			if ( testBit ( target, op ) ) setFlag(FLAG_CF);
-			else resetFlag ( FLAG_CF );
-			resetBit ( &target, op );
-			GR.write(data.reg2(),target);
-		}
-	}
+//!Instruction btr_rm32_imm8 behavior method
+void ac_behavior( btr_rm32_imm8 )
+{
+  acprintf ( " BTR RM32, IMM8\n" );
+  signed char i = data.immediate8();
+  int op = i;
+  uint target;
+  if ( data.usesMemory() )
+    {
+      if ( testMemBit(data.address(),op) ) setFlag ( FLAG_CF );
+      else resetFlag ( FLAG_CF );
+      resetMemBit ( data.address(), op );
+    }
+  else
+    {
+      target = GR.read(data.reg2());
+      if ( testBit ( target, op ) ) setFlag(FLAG_CF);
+      else resetFlag ( FLAG_CF );
+      resetBit ( &target, op );
+      GR.write(data.reg2(),target);
+    }
+}
 
-	//!Instruction btc_rm32_imm8 behavior method
-	void ac_behavior( btc_rm32_imm8 )
-	{
-		acprintf ( " BTC RM32, IMM8\n" );
-		signed char i =data.immediate8();
-		int op = i;
-		uint target;
-		if ( data.usesMemory() )
-		{
-			if ( testMemBit(data.address(),op) ) setFlag ( FLAG_CF );
-			else resetFlag ( FLAG_CF );
-			compMemBit ( data.address(), op );
-		}
-		else
-		{
-			target = GR.read(data.reg2());
-			if ( testBit ( target, op ) ) setFlag(FLAG_CF);
-			else resetFlag ( FLAG_CF );
-			compBit ( &target, op );
-			GR.write(data.reg2(),target);
-		}
-	}
+//!Instruction btc_rm32_imm8 behavior method
+void ac_behavior( btc_rm32_imm8 )
+{
+  acprintf ( " BTC RM32, IMM8\n" );
+  signed char i =data.immediate8();
+  int op = i;
+  uint target;
+  if ( data.usesMemory() )
+    {
+      if ( testMemBit(data.address(),op) ) setFlag ( FLAG_CF );
+      else resetFlag ( FLAG_CF );
+      compMemBit ( data.address(), op );
+    }
+  else
+    {
+      target = GR.read(data.reg2());
+      if ( testBit ( target, op ) ) setFlag(FLAG_CF);
+      else resetFlag ( FLAG_CF );
+      compBit ( &target, op );
+      GR.write(data.reg2(),target);
+    }
+}
 
-	//!Instruction inc_rm32 behavior method
-	void ac_behavior( inc_rm32 )
-	{
-		acprintf ( "INC RM32\n" );
-		uint op, res;
-		op = dataManager.getMemOrReg2();
-		res = op + 1;
-		dataManager.setMemOrReg2(res);
-		checkFlags(OPER_ADD,op,1,res,FLAG_ALL&(~FLAG_CF));
-	}
+//!Instruction inc_rm32 behavior method
+void ac_behavior( inc_rm32 )
+{
+  acprintf ( "INC RM32\n" );
+  uint op, res;
+  op = dataManager.getMemOrReg2();
+  res = op + 1;
+  dataManager.setMemOrReg2(res);
+  checkFlags(OPER_ADD,op,1,res,FLAG_ALL&(~FLAG_CF));
+}
 
 //!Instruction dec_rm32 behavior method
 void ac_behavior( dec_rm32 )
 {
-	acprintf ( "DEC RM32\n" );
-	if ( OperandSize == OPERAND_SIZE16 )
-	{
-		ushort op1, op2, res;
-		op1 = dataManager.getMemOrReg2();
-		op2 = 1;
-		res = op1 - op2;
-		dataManager.setMemOrReg2(res);
-		checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
-	}
-	else if ( OperandSize == OPERAND_SIZE32 )
-	{
-		uint op1, op2, res;
-		op1 = dataManager.getMemOrReg2();
-		op2 = 1;
-		res = op1 - op2;
-		dataManager.setMemOrReg2(res);
-		checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
-	}
+  acprintf ( "DEC RM32\n" );
+  if ( OperandSize == OPERAND_SIZE16 )
+    {
+      ushort op1, op2, res;
+      op1 = dataManager.getMemOrReg2();
+      op2 = 1;
+      res = op1 - op2;
+      dataManager.setMemOrReg2(res);
+      checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+    }
+  else if ( OperandSize == OPERAND_SIZE32 )
+    {
+      uint op1, op2, res;
+      op1 = dataManager.getMemOrReg2();
+      op2 = 1;
+      res = op1 - op2;
+      dataManager.setMemOrReg2(res);
+      checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+    }
 }
 
-	//!Instruction jmp_rm32 behavior method
-	void ac_behavior( jmp_rm32 )
-	{
-		acprintf ( " JMP RM32\n" );
-		if (data.usesMemory()) ac_pc=MEM.read(data.address());
-		else ac_pc=GR.read(data.reg2());
-	}
+//!Instruction jmp_rm32 behavior method
+void ac_behavior( jmp_rm32 )
+{
+  acprintf ( " JMP RM32\n" );
+  if (data.usesMemory()) ac_pc=MEM.read(data.address());
+  else ac_pc=GR.read(data.reg2());
+}
 
-	//!Instruction jmp_m16_32 behavior method
-	void ac_behavior( jmp_m16_32 )
-	{
-		acprintf ( " JMP M16:32 <Not implemented>\n" );
-	}
+//!Instruction jmp_m16_32 behavior method
+void ac_behavior( jmp_m16_32 )
+{
+  acprintf ( " JMP M16:32 <Not implemented>\n" );
+}
 
-	//!Instruction call_rm32 behavior method
-	void ac_behavior( call_rm32 )
-	{
-		acprintf ( " CALL RM32\n" );
-		push(ac_pc);
-		if ( data.usesMemory() ) ac_pc=MEM.read(data.address());
-		else ac_pc=GR.read(data.reg2());
-	}
+//!Instruction call_rm32 behavior method
+void ac_behavior( call_rm32 )
+{
+  acprintf ( " CALL RM32\n" );
+  push(ac_pc);
+  if ( data.usesMemory() ) ac_pc=MEM.read(data.address());
+  else ac_pc=GR.read(data.reg2());
+}
 
-	//!Instruction call_m16_32 behavior method
-	void ac_behavior( call_m16_32 )
-	{
-		acprintf ( " CALL M16:32 <Not implemented>\n" );
-	}
+//!Instruction call_m16_32 behavior method
+void ac_behavior( call_m16_32 )
+{
+  acprintf ( " CALL M16:32 <Not implemented>\n" );
+}
 
-	//!Instruction sub_rm32_imm32 behavior method
-	void ac_behavior( sub_rm32_imm32 )
-	{
-		// acprintf ( "SUB RM32, IMM32\t\t" );
-		uint op1, op2, aux;
-		op1 = data.immediate();
-		if ( data.usesMemory() ) op2 = MEM.read(data.address());
-		else op2 = GR.read(data.reg2());
-		aux = op2 - op1;
-		if ( data.usesMemory() ) MEM.write(data.address(),aux);
-		else GR.write(data.reg2(),aux);
-		if ( data.usesMemory() ) acprintfmi ( "SUB", data.address(), op1 );
-		else acprintfri ( "SUB", data.reg2(), op1 );
-		checkFlags(OPER_SUB,op2,op1,aux,FLAG_ALL);
-	}
+//!Instruction sub_rm32_imm32 behavior method
+void ac_behavior( sub_rm32_imm32 )
+{
+  // acprintf ( "SUB RM32, IMM32\t\t" );
+  uint op1, op2, aux;
+  op1 = data.immediate();
+  if ( data.usesMemory() ) op2 = MEM.read(data.address());
+  else op2 = GR.read(data.reg2());
+  aux = op2 - op1;
+  if ( data.usesMemory() ) MEM.write(data.address(),aux);
+  else GR.write(data.reg2(),aux);
+  if ( data.usesMemory() ) acprintfmi ( "SUB", data.address(), op1 );
+  else acprintfri ( "SUB", data.reg2(), op1 );
+  checkFlags(OPER_SUB,op2,op1,aux,FLAG_ALL);
+}
 
-	//!Instruction sub_rm32_imm8 behavior method
-	void ac_behavior( sub_rm32_imm8 )
-	{
-		// acprintf ( "SUB RM32, IMM8\t\t" );
-		signed char i = data.immediate8();
-		signed int j = i;
-		uint op1, op2, aux;
-		if ( data.usesMemory() ) acprintfmi ( "SUB", data.address(), j );
-		else acprintfri ( "SUB", data.reg2(), j );
-		op1 = (unsigned)j;
-		if ( data.usesMemory() ) op2 = MEM.read(data.address());
-		else op2 = GR.read(data.reg2());
-		aux = op2 - op1;
-		if ( data.usesMemory() ) MEM.write(data.address(),aux);
-		else GR.write(data.reg2(),aux);
-		checkFlags(OPER_SUB,op2,op1,aux,FLAG_ALL);
-	}
+//!Instruction sub_rm32_imm8 behavior method
+void ac_behavior( sub_rm32_imm8 )
+{
+  // acprintf ( "SUB RM32, IMM8\t\t" );
+  signed char i = data.immediate8();
+  signed int j = i;
+  uint op1, op2, aux;
+  if ( data.usesMemory() ) acprintfmi ( "SUB", data.address(), j );
+  else acprintfri ( "SUB", data.reg2(), j );
+  op1 = (unsigned)j;
+  if ( data.usesMemory() ) op2 = MEM.read(data.address());
+  else op2 = GR.read(data.reg2());
+  aux = op2 - op1;
+  if ( data.usesMemory() ) MEM.write(data.address(),aux);
+  else GR.write(data.reg2(),aux);
+  checkFlags(OPER_SUB,op2,op1,aux,FLAG_ALL);
+}
 
-	//!Instruction sbb_rm32_imm32 behavior method
-	void ac_behavior( sbb_rm32_imm32 )
-	{
-		acprintf ( " SBB RM32, IMM32\n" );
-		uint op1, op2, aux;
-		op1 = data.immediate() + testFlag(FLAG_CF);
-		if ( data.usesMemory() ) op2 = MEM.read(data.address());
-		else op2 = GR.read(data.reg2());
-		aux = op2 - op1;
-		if ( data.usesMemory() ) MEM.write(data.address(),aux);
-		else GR.write(data.reg2(),aux);
-		checkFlags(OPER_SUB,op2,op1,aux,FLAG_ALL);
-	}
+//!Instruction sbb_rm32_imm32 behavior method
+void ac_behavior( sbb_rm32_imm32 )
+{
+  acprintf ( " SBB RM32, IMM32\n" );
+  uint op1, op2, aux;
+  op1 = data.immediate() + testFlag(FLAG_CF);
+  if ( data.usesMemory() ) op2 = MEM.read(data.address());
+  else op2 = GR.read(data.reg2());
+  aux = op2 - op1;
+  if ( data.usesMemory() ) MEM.write(data.address(),aux);
+  else GR.write(data.reg2(),aux);
+  checkFlags(OPER_SUB,op2,op1,aux,FLAG_ALL);
+}
 
-	//!Instruction sbb_rm32_imm8 behavior method
-	void ac_behavior( sbb_rm32_imm8 )
-	{
-		acprintf ( " SBB RM32, IMM8\n" );
-		signed char i = data.immediate8();
-		signed int j = i;
-		uint op1, op2, aux;
-		op1 = (unsigned)j;
-		if ( data.usesMemory() ) op2 = MEM.read(data.address());
-		else op2 = GR.read(data.reg2());
-		op1+= testFlag(FLAG_CF);
-		aux = op2 - op1;
-		if ( data.usesMemory() ) MEM.write(data.address(),aux);
-		else GR.write(data.reg2(),aux);
-		checkFlags(OPER_SUB,op2,op1,aux,FLAG_ALL);
-	}
+//!Instruction sbb_rm32_imm8 behavior method
+void ac_behavior( sbb_rm32_imm8 )
+{
+  acprintf ( " SBB RM32, IMM8\n" );
+  signed char i = data.immediate8();
+  signed int j = i;
+  uint op1, op2, aux;
+  op1 = (unsigned)j;
+  if ( data.usesMemory() ) op2 = MEM.read(data.address());
+  else op2 = GR.read(data.reg2());
+  op1+= testFlag(FLAG_CF);
+  aux = op2 - op1;
+  if ( data.usesMemory() ) MEM.write(data.address(),aux);
+  else GR.write(data.reg2(),aux);
+  checkFlags(OPER_SUB,op2,op1,aux,FLAG_ALL);
+}
 
-	//!Instruction adc_rm32_imm32 behavior method
-	void ac_behavior( adc_rm32_imm32 )
-	{
-		acprintf ( " ADC RM32, IMM32\n" );
-		uint op1, op2, aux;
-		op1 = data.immediate() + testFlag(FLAG_CF);
-		if ( data.usesMemory() ) op2 = MEM.read(data.address());
-		else op2 = GR.read(data.reg2());
-		aux = op1 + op2;
-		if ( data.usesMemory() ) MEM.write(data.address(),aux);
-		else GR.write(data.reg2(),aux);
-		checkFlags(OPER_ADD,op1,op2,aux,FLAG_ALL);
-	}
+//!Instruction adc_rm32_imm32 behavior method
+void ac_behavior( adc_rm32_imm32 )
+{
+  acprintf ( " ADC RM32, IMM32\n" );
+  uint op1, op2, aux;
+  op1 = data.immediate() + testFlag(FLAG_CF);
+  if ( data.usesMemory() ) op2 = MEM.read(data.address());
+  else op2 = GR.read(data.reg2());
+  aux = op1 + op2;
+  if ( data.usesMemory() ) MEM.write(data.address(),aux);
+  else GR.write(data.reg2(),aux);
+  checkFlags(OPER_ADD,op1,op2,aux,FLAG_ALL);
+}
 
 	//!Instruction adc_rm32_imm8 behavior method
 	void ac_behavior( adc_rm32_imm8 )
@@ -4340,28 +4368,28 @@ void ac_behavior( dec_rm32 )
 		checkFlags(OPER_ADD,op1,op2,aux,FLAG_ALL);
 	}
 
-	//!Instruction cmp_rm32_imm32 behavior method
-	void ac_behavior( cmp_rm32_imm32 )
-	{
-		acprintf ( " CMP RM32, IMM32\n" );
-		signed int op1, op2, aux;
-		op1 = data.immediate();
-		if ( data.usesMemory() ) op2 = MEM.read(data.address());
-		else op2 = GR.read(data.reg2());
-		aux = op1-op2;
-		checkFlags(OPER_SUB,op1,op2,aux,FLAG_ALL);
-	}
+//!Instruction cmp_rm32_imm32 behavior method
+void ac_behavior( cmp_rm32_imm32 )
+{
+  acprintf ( " CMP RM32, IMM32\n" );
+  signed int op1, op2, aux;
+  op1 = data.immediate();
+  if ( data.usesMemory() ) op2 = MEM.read(data.address());
+  else op2 = GR.read(data.reg2());
+  aux = op1-op2;
+  checkFlags(OPER_SUB,op1,op2,aux,FLAG_ALL);
+}
 
-	//!Instruction cmp_rm32_imm8 behavior method
-	void ac_behavior( cmp_rm32_imm8 )
-	{
-		acprintf ( "CMP RM32, IMM8\n" );
-		signed char i = data.immediate8();
-		signed int op1 = dataManager.getMemOrReg2();
-		signed int op2 = i;
-		signed int res = op1 - op2;
-		checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL);
-	}
+//!Instruction cmp_rm32_imm8 behavior method
+void ac_behavior( cmp_rm32_imm8 )
+{
+  acprintf ( "CMP RM32, IMM8\n" );
+  signed char i = data.immediate8();
+  signed int op1 = dataManager.getMemOrReg2();
+  signed int op2 = i;
+  signed int res = op1 - op2;
+  checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL);
+}
 
 //!Instruction and_rm32_imm32 behavior method
 void ac_behavior( and_rm32_imm32 )
@@ -4854,91 +4882,92 @@ void ac_behavior( P_BNTAKEN )
 //!Instruction P_OPSIZE behavior method
 void ac_behavior( P_OPSIZE )
 {
-	acprintf ( "OPERAND SIZE is 16Bits for next instruction\n" );
-	OperandSize = OPERAND_SIZE16JUST;
+  acprintf ( "OPERAND SIZE is 16Bits for next instruction\n" );
+  OperandSize = OPERAND_SIZE16JUST;
+  //  OperandSize = OPERAND_SIZE32;
 }
 
 //!Instruction P_ADSIZE behavior method
 void ac_behavior( P_ADSIZE )
 {
-	acprintf ( " ADDRESS SIZE if 16Bits for next instruction\n" );
-	AddressSize = ADDRESS_SIZE16JUST;
+  acprintf ( " ADDRESS SIZE if 16Bits for next instruction\n" );
+  AddressSize = ADDRESS_SIZE16JUST;
 }
 
 //!Instruction movb_rm32_imm8 behavior method
 void ac_behavior( mov_rm8_imm8 )
 {
-	acprintf ( "CALLED MOV RM8, IMM8\n" );
-	if ( data.usesMemory() ) MEM.write_byte(data.address(),data.immediate8());
-	else GR.write(data.reg2(),data.immediate8());
+  acprintf ( "CALLED MOV RM8, IMM8\n" );
+  if ( data.usesMemory() ) MEM.write_byte(data.address(),data.immediate8());
+  else GR.write(data.reg2(),data.immediate8());
 }
 
 //!Instruction mov_r8_rm8 behavior method
 void ac_behavior( mov_r8_rm8 )
 {
-	acprintf ( "CALLED MOV R8, RM8\n" );
-	unsigned char op;
-	if ( data.usesMemory() ) op = MEM.read_byte(data.address());
-	else op = readRegister8(data.reg2());
-	writeRegister8(data.reg1(),op);
+  acprintf ( "CALLED MOV R8, RM8\n" );
+  unsigned char op;
+  if ( data.usesMemory() ) op = MEM.read_byte(data.address());
+  else op = readRegister8(data.reg2());
+  writeRegister8(data.reg1(),op);
 }
 
 //!Instruction mov_rm8_r8 behavior method
 void ac_behavior( mov_rm8_r8 )
 {
-	acprintf ( "CALLED MOV RM8, R8\n" );
-	unsigned char op = readRegister8(data.reg1());
-	if ( data.usesMemory() ) MEM.write_byte(data.address(),op);
-	else writeRegister8(data.reg2(),op);
+  acprintf ( "CALLED MOV RM8, R8\n" );
+  unsigned char op = readRegister8(data.reg1());
+  if ( data.usesMemory() ) MEM.write_byte(data.address(),op);
+  else writeRegister8(data.reg2(),op);
 }
 
 //!Instruction mov_AL_imm8 behavior method
 void ac_behavior( mov_AL_imm8 )
 {
-	acprintf ( "CALLED MOV AL, IMM8\n" );
-	writeRegister8(AL,data.immediate8());
+  acprintf ( "CALLED MOV AL, IMM8\n" );
+ writeRegister8(AL,data.immediate8());
 }
 
 //!Instruction mov_CL_imm8 behavior method
 void ac_behavior( mov_CL_imm8 )
 {
-	acprintf ( "CALLED MOV CL, IMM8\n" );
-	writeRegister8(CL,data.immediate8());
+  acprintf ( "CALLED MOV CL, IMM8\n" );
+  writeRegister8(CL,data.immediate8());
 }
 
 //!Instruction mov_DL_imm8 behavior method
 void ac_behavior( mov_DL_imm8 )
 {
-	acprintf ( "CALLED MOV DL, IMM8\n" );
-	writeRegister8(DL,data.immediate8());
+  acprintf ( "CALLED MOV DL, IMM8\n" );
+  writeRegister8(DL,data.immediate8());
 }
 
 //!Instruction mov_BL_imm8 behavior method
 void ac_behavior( mov_BL_imm8 )
 {
-	acprintf ( "CALLED MOV BL, IMM8\n" );
-	writeRegister8(BL,data.immediate8());
+  acprintf ( "CALLED MOV BL, IMM8\n" );
+  writeRegister8(BL,data.immediate8());
 }
 
 //!Instruction mov_AH_imm8 behavior method
 void ac_behavior( mov_AH_imm8 )
 {
-	acprintf ( "CALLED MOV AH, IMM8\n" );
-	writeRegister8(AH,data.immediate8());
+  acprintf ( "CALLED MOV AH, IMM8\n" );
+   writeRegister8(AH,data.immediate8());
 }
 
 //!Instruction mov_CH_imm8 behavior method
 void ac_behavior( mov_CH_imm8 )
 {
-	acprintf ( "CALLED MOV CH, IMM8\n" );
-	writeRegister8(CH,data.immediate8());
+  acprintf ( "CALLED MOV CH, IMM8\n" );
+  writeRegister8(CH,data.immediate8());
 }
 
 //!Instruction mov_DH_imm8 behavior method
 void ac_behavior( mov_DH_imm8 )
 {
-	acprintf ( "CALLED MOV DH, IMM8\n" );
-	writeRegister8(DH,data.immediate8());
+  acprintf ( "CALLED MOV DH, IMM8\n" );
+  writeRegister8(DH,data.immediate8());
 }
 
 //!Instruction mov_BH_imm8 behavior method
@@ -5390,8 +5419,12 @@ void ac_behavior( dump_stack )
 //!Instruction aaa description
 
 /* *********************************************               
-Description:                                                                                                                                 Adjusts the sum of two unpacked BCD values to create an unpacked BCD result. The AL                                                          register is the implied source and destination operand for this instruction. The AAA instruction                                         
-is only useful when it follows an ADD instruction that adds (binary addition) two unpacked                                                  BCD values and stores a byte result in the AL register. The AAA instruction then adjusts the                                                 contents of the AL register to contain the correct 1-digit unpacked BCD result.                                                              
+Description:                                                                                                                                
+Adjusts the sum of two unpacked BCD values to create an unpacked BCD result. The AL                                                          
+register is the implied source and destination operand for this instruction. The AAA instruction                                         
+is only useful when it follows an ADD instruction that adds (binary addition) two unpacked                                                  
+BCD values and stores a byte result in the AL register. The AAA instruction then adjusts the                                                 
+contents of the AL register to contain the correct 1-digit unpacked BCD result.                                                              
 If the addition produces a decimal carry, the AH register increments by 1, and the CF and AF                                                 
 flags are set. If there was no decimal carry, the CF and AF flags are cleared and the AH register                                            
 is unchanged. In either case, bits 4 through 7 of the AL register are set to 0.                                                              
@@ -5401,16 +5434,17 @@ is unchanged. In either case, bits 4 through 7 of the AL register are set to 0.
 
 //!Instruction aaa behavior method.
 void ac_behavior( aaa ){
-  uint aux;
+  signed int aux;
   acprintf( "AAA - not tested\n" );
   
   aux = GR[AL];
   if ( ( (aux & 0x0F) > 9 ) or ( testFlag(FLAG_AF) ) ){ 
     aux+=6;
     GR[AL] = aux;
-    aux = GR[AH];
+    //    aux = GR[AH];
+    aux = readRegister8(AH);
     aux+=1;
-    GR[AH] = aux; 
+    writeRegister8(AH,aux); 
     writeFlag( FLAG_AF, 1);
     writeFlag( FLAG_CF, 1);
     aux = GR[AL];
@@ -5428,33 +5462,39 @@ void ac_behavior( aaa ){
 
 
 //!Instruction aad description
-/*                                            
-Description:                                                                                                                                 
-Adjusts two unpacked BCD digits (the least-significant digit in the AL register and the mostsignificant                                      
-digit in the AH register) so that a division operation performed on the result will yield                                                    
-a correct unpacked BCD value. The AAD instruction is only useful when it precedes a DIV                                                      
-instruction that divides (binary division) the adjusted value in the AX register by an unpacked                                              
-BCD value.                                                                                                                                   
-The AAD instruction sets the value in the AL register to (AL + (10 * AH)), and then clears the                                               
-AH register to 00H. The value in the AX register is then equal to the binary equivalent of the                                               original unpacked two-digit (base 10) number in registers AH and AL.                                                                        
-*/
+/**************************************************                                            
+Description:                                                                                       
+Adjusts two unpacked BCD digits (the least-significant digit in the AL register and the mostsignificant                                  
+digit in the AH register) so that a division operation performed on the result will yield                                                
+a correct unpacked BCD value. The AAD instruction is only useful when it precedes a DIV                                                  
+instruction that divides (binary division) the adjusted value in the AX register by an unpacked                                          
+BCD value.                                                                                                                               
+The AAD instruction sets the value in the AL register to (AL + (10 * AH)), and then clears the                                           
+AH register to 00H. The value in the AX register is then equal to the binary equivalent of the                   
+original unpacked two-digit (base 10) number in registers AH and AL.                                                                  
+****************************************************/
 //!Instruction aad behavior method.
 void ac_behavior( aad ){
-  uint tempAL,tempAH;
+  signed int tempAL,tempAH;
   acprintf ( " AAD - not tested\n" );
   tempAL = GR[AL];
-  tempAH = GR[AH];
+  //tempAH = GR[AH];
+  tempAH = readRegister8(AH);
   GR[AL] =  (( tempAL + ( tempAH*0x0A)  )  & 0xFF);
-  GR[AH] = 0;
-  setFlags_af( FLAG_ALL, GR[AL] );
-}//ac_behavior( aad ){
+  writeRegister8(AH,0);
+  //GR[AH] = 0;
+  setFlags_af( FLAG_SF, GR[AL] );
+  setFlags_af( FLAG_ZF, GR[AL] );
+  setFlags_af( FLAG_PF, GR[AL] );
+}//ac_behavior( aad )
 
 
 //!Instruction aam description
 /* ************************************     
-Description:                                                                                                                                 
-Adjusts the result of the multiplication of two unpacked BCD values to create a pair of unpacked                                             
-(base 10) BCD values. The AX register is the implied source and destination operand for this                                                 instruction. The AAM instruction is only useful when it follows an MUL instruction that multiplies
+Description:
+Adjusts the result of the multiplication of two unpacked BCD values to create a pair of unpacked
+(base 10) BCD values. The AX register is the implied source and destination operand for this
+instruction. The AAM instruction is only useful when it follows an MUL instruction that multiplies
 (binary multiplication) two unpacked BCD values and stores a word result in the AX
 register. The AAM instruction then adjusts the contents of the AX register to contain the correct
 2-digit unpacked (base 10) BCD result.
@@ -5464,23 +5504,25 @@ void ac_behavior( aam ){
   uint tempAL;
   acprintf ( " AAM - not tested\n" );
   tempAL = GR[AL];
-  GR[AH] = ( tempAL / 0x0A );
+  //GR[AH] = ( tempAL / 0x0A );
+  writeRegister8(AH, ( tempAL / 0x0A));
   GR[AL] = ( tempAL % 0x0A );
-  setFlags_af( FLAG_ALL,GR[AL] );
-
+  setFlags_af( FLAG_SF,GR[AL] );
+  setFlags_af( FLAG_ZF,GR[AL] );
+  setFlags_af( FLAG_PF,GR[AL] );
 } //ac_behavior( aam )
 
 //!Instruction aas description
 /* *****************************************************    
-Adjusts the result of the subtraction of two unpacked BCD values to create a unpacked BCD                                                    
-result. The AL register is the implied source and destination operand for this instruction. The                                              
-AAS instruction is only useful when it follows a SUB instruction that subtracts (binary subtraction)                                         
-one unpacked BCD value from another and stores a byte result in the AL register. The AAA                                                     
-instruction then adjusts the contents of the AL register to contain the correct 1-digit unpacked                                             
-BCD result.                                                                                                                                  
-If the subtraction produced a decimal carry, the AH register decrements by 1, and the CF and                                                 
-AF flags are set. If no decimal carry occurred, the CF and AF flags are cleared, and the AH                                                  
-register is unchanged. In either case, the AL register is left with its top nibble set to 0.                                                 
+Adjusts the result of the subtraction of two unpacked BCD values to create a unpacked BCD                                                
+result. The AL register is the implied source and destination operand for this instruction. The                                          
+AAS instruction is only useful when it follows a SUB instruction that subtracts (binary subtraction)                                     
+one unpacked BCD value from another and stores a byte result in the AL register. The AAA                                                 
+instruction then adjusts the contents of the AL register to contain the correct 1-digit unpacked                                         
+BCD result.                                                                                                                              
+If the subtraction produced a decimal carry, the AH register decrements by 1, and the CF and                                             
+AF flags are set. If no decimal carry occurred, the CF and AF flags are cleared, and the AH                                       
+register is unchanged. In either case, the AL register is left with its top nibble set to 0.                                             
 ******************************************************* */
 //!Instruction aas behavior method.
 void ac_behavior( aas ){
@@ -5491,8 +5533,11 @@ void ac_behavior( aas ){
     aux = aux - 6;
     aux = (aux & 0x0F);
     GR[AL] = aux;
-    aux = GR[AH];
+    aux = readRegister8(AH);
+    //aux = GR[AH];
     aux = aux - 1;
+    //    GR[AH] = aux;
+    writeRegister8(AH,aux);
     setFlag( FLAG_AF );
     setFlag( FLAG_CF );
   }//if
@@ -5506,11 +5551,165 @@ void ac_behavior( aas ){
 } //ac_behavior( aas )
 
 
+//!Instruction cbw_cwde  description
+/****************************************
+Description
+Double the size of the source operand by means of sign extension. The CBW (convert byte to
+word) instruction copies the sign (bit 7) in the source operand into every bit in the AH register.
+The CWDE (convert word to doubleword) instruction copies the sign (bit 15) of the word in the
+AX register into the high 16 bits of the EAX register.
+CBW and CWDE reference the same opcode. The CBW instruction is intended for use when the
+operand-size attribute is 16; CWDE is intended for use when the operand-size attribute is 32.
+Some assemblers may force the operand size. Others may treat these two mnemonics as
+synonyms (CBW/CWDE) and use the setting of the operand-size attribute to determine the size
+of values to be converted.
+*****************************************/
+
+//!Instruction cbw_cwde behavior method.
+void ac_behavior( cbw_cwde )
+{
+  signed int tempGR;
+  if ( OperandSize == OPERAND_SIZE16 ){ //Instruction = CBW
+    acprintf ( " CBW <Not Tested>\n" );
+    tempGR = GR[AL];
+    if (MSB8(tempGR))//negativo
+      GR[AX] = 0xFF00 | (tempGR & MASK_8BITS);
+    else
+      GR[AX] = 0x0000 | (tempGR & MASK_8BITS);
+  }//if
+  else if ( OperandSize == OPERAND_SIZE32 ){//Instruction = CWDE
+    acprintf ( "CWDE <Not Tested>\n" );
+    tempGR = GR[AX];
+    if (MSB16(tempGR))//negativo
+      GR[EAX] = 0xFFFF0000 | (tempGR & MASK_16BITS);
+    else
+      GR[EAX] = 0x00000000 | (tempGR & MASK_16BITS);
+
+  }//else 
+}//ac_behavior (cbw_cwde)
+
+//!Instruction daa  description
+/*********************************************
+Description
+Adjusts the sum of two packed BCD values to create a packed BCD result. The AL register is
+the implied source and destination operand. The DAA instruction is only useful when it follows
+an ADD instruction that adds (binary addition) two 2-digit, packed BCD values and stores a byte
+result in the AL register. The DAA instruction then adjusts the contents of the AL register to
+contain the correct 2-digit, packed BCD result. If a decimal carry is detected, the CF and AF
+flags are set accordingly.
+*********************************************/
+//!Instruction daa behavior method.
+void ac_behavior( daa ){
+  acprintf ( " DAA <Not Tested>\n" );
+  uint tempAL,old_AL,old_FLAG_CF;
+  uint op1, res; //para checar Flags
+  old_AL = GR[AL];
+  old_FLAG_CF = SPR[FLAG_CF];
+ 
+  if( ((GR[AL] & 0x0F) > 9) || (testFlag(FLAG_AF)) ){
+    tempAL = GR[AL];
+    op1 = tempAL;
+    tempAL += 6;
+    res = tempAL;
+    GR[AL] = tempAL;  
+    writeFlag(FLAG_CF,( old_FLAG_CF ||( ( (unsigned int)tempAL) > 0xFF    )));
+    setFlag(FLAG_AF);
+
+    checkFlags8(OPER_ADD, op1,6,res,FLAG_SF );
+    checkFlags8(OPER_ADD, op1,6,res,FLAG_ZF );
+    checkFlags8(OPER_ADD, op1,6,res,FLAG_PF );
+
+  }//if
+  else
+    resetFlag(FLAG_AF);
+
+  if ((old_AL > 0x99) || (old_FLAG_CF == 1)){
+    tempAL = GR[AL];
+    op1 = tempAL;
+    tempAL += 0x60;
+    res = tempAL;
+    GR[AL] = tempAL;
+    setFlag(FLAG_CF);
+
+    checkFlags8(OPER_ADD, op1,0x60,res,FLAG_SF );
+    checkFlags8(OPER_ADD, op1,0x60,res,FLAG_ZF );
+    checkFlags8(OPER_ADD, op1,0x60,res,FLAG_PF );
+  }//if
+  else
+    resetFlag(FLAG_CF);
+  
+  
+}//ac_behavior( daa )
+
+
+
+
+
+/**************************************
+//!Instruction das description
+Description
+Adjusts the result of the subtraction of two packed BCD values to create a packed BCD result.
+The AL register is the implied source and destination operand. The DAS instruction is only
+useful when it follows a SUB instruction that subtracts (binary subtraction) one 2-digit, packed
+BCD value from another and stores a byte result in the AL register. The DAS instruction then
+adjusts the contents of the AL register to contain the correct 2-digit, packed BCD result. If a
+decimal borrow is detected, the CF and AF flags are set accordingly.
+**************************************/
+//!Instruction das behavior method.
+void ac_behavior( das ){
+  acprintf ( " DAS <Not Tested>\n" );
+
+  uint tempAL,old_AL,old_FLAG_CF;
+  uint op1, res; //para checar Flags
+  old_AL = GR[AL];
+  old_FLAG_CF = SPR[FLAG_CF];
+ 
+  if( ((GR[AL] & 0x0F) > 9) || (testFlag(FLAG_AF)) ){
+    tempAL = GR[AL];
+    op1 = tempAL;
+    tempAL = tempAL - 6;
+    res = tempAL;
+    GR[AL] = tempAL;  
+    writeFlag(FLAG_CF,( old_FLAG_CF || ( checkCarry8(OPER_SUB,op1,6,0) )) );
+    setFlag(FLAG_AF);
+
+    checkFlags8(OPER_SUB, op1,6,res,FLAG_SF );
+    checkFlags8(OPER_SUB, op1,6,res,FLAG_ZF );
+    checkFlags8(OPER_SUB, op1,6,res,FLAG_PF );
+
+  }//if
+  else
+    resetFlag(FLAG_AF);
+
+  if ((old_AL > 0x99) || (old_FLAG_CF == 1)){
+    tempAL = GR[AL];
+    op1 = tempAL;
+    tempAL = tempAL - 0x60;
+    res = tempAL;
+    GR[AL] = tempAL;
+    setFlag(FLAG_CF);
+
+    checkFlags8(OPER_SUB, op1,0x60,res,FLAG_SF );
+    checkFlags8(OPER_SUB, op1,0x60,res,FLAG_ZF );
+    checkFlags8(OPER_SUB, op1,0x60,res,FLAG_PF );
+  }//if
+  else
+    resetFlag(FLAG_CF);
+
+
+
+}//ac_behavior ( das );
+
+
+
+
+
+
 /*
-//!Instruction aam behavior method.
-void ac_behavior( aam ){
-	acprintf ( " AAM <Not implemented>\n" );
-} //ac_behavior( aam )
+
+
+
+
 
 
 

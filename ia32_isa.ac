@@ -32,7 +32,7 @@ AC_ISA(IA32)
 			aad;
 
   ac_instr<Type_op2bd32>	ja_jnbe_rel16_32,
-                        	jae_jnb_jnc_rel16_32, jb_jc_jnae_rel16_32, jbe_jna_rel16_32,
+        		        jae_jnb_jnc_rel16_32, jb_jc_jnae_rel16_32, jbe_jna_rel16_32,
                         	je_jz_rel16_32, jg_jnle_rel16_32, jge_jnl_rel16_32,
                         	jl_jnge_rel16_32, jle_jng_rel16_32, jne_jnz_rel16_32,
                         	jno_rel16_32, jnp_jpo_rel16_32, jns_rel16_32, jo_rel16_32,
@@ -77,7 +77,7 @@ AC_ISA(IA32)
                         jo_rel8, jp_jpe_rel8, js_rel8, jcxz_jecxz_rel8, loop_rel8,
 			loope_loopz_rel8, loopne_loopnz_rel8, jmp_rel8;
 
-  ac_instr<Type_op1bd32>	call_rel32, jmp_rel32;
+  ac_instr<Type_op1bd32> call_rel32, jmp_rel32;
 
   ac_instr<Type_op1bi>	mov_EAX_imm32, mov_ECX_imm32, mov_EDX_imm32, mov_EBX_imm32,
 			mov_ESP_imm32, mov_EBP_imm32, mov_ESI_imm32, mov_EDI_imm32,
