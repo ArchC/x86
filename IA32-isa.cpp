@@ -31,6 +31,9 @@
 Rotinas Alteradas:
 readRegister8();
 writeRegister8();
+24/03/06
+void ac_behavior( Type_op1bi )
+DataManager
 ******************************/
 
        
@@ -133,6 +136,7 @@ int AddressSize;
 // Used to print instructions in generic format (ex."mov rm32, r32")
 void acprintfg ( char *s )
 {
+  
   if (GENERICVERBOSE && !VERBOSE) fprintf(OUTSTREAM, "%s\n", s);
   else if (GENERICVERBOSE && VERBOSE) fprintf(OUTSTREAM, "%s\t\t", s);
 }
@@ -185,6 +189,7 @@ void acprintfi32 ( char *inst, uint i )
 
 void acprintfri16 ( char *inst, uint reg, ushort i )
 {
+  
   if (VERBOSE) fprintf(OUTSTREAM, "%s %s, 0x%04X\n", inst, reg_str16[reg], i);
 }
 
@@ -702,11 +707,11 @@ uint readMemory16(uint a)
 
 uint readMemory8(uint a)
 {
-	signed char aux8;
-	signed int aux;
-	aux8 = (MEM.read(a) & MASK_8BITS);
-	aux = aux8;
-	return aux;
+  signed char aux8;
+  signed int aux;
+  aux8 = (MEM.read(a) & MASK_8BITS);
+  aux = aux8;
+  return aux;
 }
 
 void writeMemory(uint a, uint val)
@@ -902,7 +907,22 @@ public:
   void address(uint a) {Address=a;};
   unsigned char address8() {return Address8;};
   void address8(unsigned char a) {Address8=a;};
-  uint immediate() {ac_pc+=4; SPR.write(EIP,(int)ac_pc); return Immediate;};
+  uint immediate() {
+    //    ac_pc+=4; SPR.write(EIP,(int)ac_pc); 
+    
+    if ( OperandSize == OPERAND_SIZE16){
+      ac_pc+=2; SPR.write(EIP,(int)ac_pc); 
+      acprintf("Size 16\n");
+     
+    }
+    else if (OperandSize == OPERAND_SIZE32){
+      ac_pc+=4; SPR.write(EIP,(int)ac_pc); 
+      acprintf("Size 32\n");
+     
+  }
+  
+    return Immediate;
+  };
   void immediate(signed int i) {Immediate=i;};
   uint immediate8() {ac_pc+=1; SPR.write(EIP,(int)ac_pc); return Immediate8;};
   void immediate8(signed char i) {Immediate8=i;};
@@ -916,6 +936,8 @@ public:
   };
   uint acpc_inc;
 };
+
+
 
 Data data;
 int IFJustSet;
@@ -939,7 +961,8 @@ public:
   uint getReg2() { return readRegister(data.reg2()); };
   uint getImmediate()
   {
-    if ( OperandSize == OPERAND_SIZE16 ) return data.immediate16();
+    //    if ( OperandSize == OPERAND_SIZE16 ) return data.immediate16();
+    if ( OperandSize == OPERAND_SIZE16 ) return data.immediate();
     else if ( OperandSize == OPERAND_SIZE32 ) return data.immediate();
     return data.immediate();
   }
@@ -1049,6 +1072,7 @@ public:
   {
     if ( OperandSize == OPERAND_SIZE16 )
       {
+        //printf("16 bits\n");
 	acprintfg(g16);
 	acprintfri16(i16, data.reg2(), i);
       }
@@ -1125,85 +1149,85 @@ uint processSib(uint mod, uint sib, uint disp, uint imm, bool *used)
 
 void processData(uint mod, uint regop, uint rm, uint sib, uint disp, uint imm)
 {
-	bool used = false;
-	uint disp8, disp32;
-	data.usesMemory(true);
-        data.reg1(regop);
-	data.acpc_inc = 0;
-        switch(mod)
-        {
-                case 0x00:
-		disp32 = (disp<<8)|(sib&MASK_8BITS);
-                switch(rm)
-                {
-			case 0x04:	// SIB
-			data.address(processSib(mod,sib,disp,imm,&used));
-			data.acpc_inc+=2;
-			ac_pc+= 2;
-			if ( !used ) data.immediates(disp);
-			break;
-			case 0x05:	// DISP32
-			data.address(disp32);
-			data.acpc_inc+=5;
-			ac_pc+= 5;
-			data.immediates((disp>>24)+(imm<<8));
-			break;
-			default:	// [E**]
-			data.address(GR.read(rm));
-			data.acpc_inc+=1;
-			ac_pc+= 1;
-			data.immediates(disp32);
-			break;
-                };
-                break;
-
-                case 0x01:
-		disp8 = signExtend8(disp&MASK_8BITS);
-                switch(rm)
-                {
-			case 0x04:	// SIB+DISP8
-			data.address(processSib(mod,sib,disp,imm,&used) + (signed)disp8);
-			data.acpc_inc+=3;
-			ac_pc+= 3;
-			data.immediates((imm<<24)|((disp>>8)&MASK_8BITS));
-			break;
-			default:	// [E**]+DISP8
-			data.address(GR.read(rm) + (signed)signExtend8(sib));
-			data.acpc_inc+=2;
-			ac_pc+= 2;
-			data.immediates(disp);
-			break;
-                };
-                break;
-
-                case 0x02:
-		disp32 = disp;
-                switch(rm)
-                {
-			case 0x04:	// SIB+DISP32
-			data.address(processSib(mod,sib,disp,imm,&used) + (signed)disp32);
-			data.acpc_inc+=6;
-			ac_pc+= 6;
-			data.immediates(imm);
-			break;
-			default:	// [E**]+DISP32
-			disp32 = (disp<<8)|(sib&MASK_8BITS);
-			data.address(GR.read(rm) + (signed)disp32);
-			data.acpc_inc+=5;
-			ac_pc+= 5;
-			data.immediates(((disp>>24)&MASK_8BITS)|(imm<<8));
-			break;
-                };
-                break;
-
-                case 0x03:
-                data.usesMemory(false);
-                data.reg2(rm);
-		data.acpc_inc+=1;
-                ac_pc+=1;
-		data.immediates((sib&MASK_8BITS)|(disp<<8));
-                break;
-        };
+  bool used = false;
+  uint disp8, disp32;
+  data.usesMemory(true);
+  data.reg1(regop);
+  data.acpc_inc = 0;
+  switch(mod)
+    {
+    case 0x00:
+      disp32 = (disp<<8)|(sib&MASK_8BITS);
+      switch(rm)
+	{
+	case 0x04:	// SIB
+	  data.address(processSib(mod,sib,disp,imm,&used));
+	  data.acpc_inc+=2;
+	  ac_pc+= 2;
+	  if ( !used ) data.immediates(disp);
+	  break;
+	case 0x05:	// DISP32
+	  data.address(disp32);
+	  data.acpc_inc+=5;
+	  ac_pc+= 5;
+	  data.immediates((disp>>24)+(imm<<8));
+	  break;
+	default:	// [E**]
+	  data.address(GR.read(rm));
+	  data.acpc_inc+=1;
+	  ac_pc+= 1;
+	  data.immediates(disp32);
+	  break;
+	};
+      break;
+      
+    case 0x01:
+      disp8 = signExtend8(disp&MASK_8BITS);
+      switch(rm)
+	{
+	case 0x04:	// SIB+DISP8
+	  data.address(processSib(mod,sib,disp,imm,&used) + (signed)disp8);
+	  data.acpc_inc+=3;
+	  ac_pc+= 3;
+	  data.immediates((imm<<24)|((disp>>8)&MASK_8BITS));
+	  break;
+	default:	// [E**]+DISP8
+	  data.address(GR.read(rm) + (signed)signExtend8(sib));
+	  data.acpc_inc+=2;
+	  ac_pc+= 2;
+	  data.immediates(disp);
+	  break;
+	};
+      break;
+      
+    case 0x02:
+      disp32 = disp;
+      switch(rm)
+	{
+	case 0x04:	// SIB+DISP32
+	  data.address(processSib(mod,sib,disp,imm,&used) + (signed)disp32);
+	  data.acpc_inc+=6;
+	  ac_pc+= 6;
+	  data.immediates(imm);
+	  break;
+	default:	// [E**]+DISP32
+	  disp32 = (disp<<8)|(sib&MASK_8BITS);
+	  data.address(GR.read(rm) + (signed)disp32);
+	  data.acpc_inc+=5;
+	  ac_pc+= 5;
+	  data.immediates(((disp>>24)&MASK_8BITS)|(imm<<8));
+	  break;
+	};
+      break;
+      
+    case 0x03:
+      data.usesMemory(false);
+      data.reg2(rm);
+      data.acpc_inc+=1;
+      ac_pc+=1;
+      data.immediates((sib&MASK_8BITS)|(disp<<8));
+      break;
+    };
 }
 
 
@@ -2130,26 +2154,27 @@ void ac_behavior( lds_r32_m16_32 )
 //!Instruction les_r32_m16_32 behavior method.
 void ac_behavior( les_r32_m16_32 )
 {
-	uint sel = readMemory16(data.address());
-	uint offset = readMemory(data.address()+2);
-	printManager.printReg1Addr("LES R16, M16:16","LES R32, M16:32","LES","LES",sel,offset);
-	writeSRegister(ES, sel);
-	writeRegister(data.reg1(), offset);
+  uint sel = readMemory16(data.address());
+  uint offset = readMemory(data.address()+2);
+  printManager.printReg1Addr("LES R16, M16:16","LES R32, M16:32","LES","LES",sel,offset);
+  writeSRegister(ES, sel);
+  writeRegister(data.reg1(), offset);
 }
 
 //!Instruction lea_r32_m behavior method.
 void ac_behavior( lea_r32_m )
 {
-	printManager.printReg1Addr ( "LEA R16, M", "LEA R32, M", "LEA", "LEA" );
-	dataManager.setReg1(data.address());
+  printManager.printReg1Addr ( "LEA R16, M", "LEA R32, M", "LEA", "LEA" );
+  dataManager.setReg1(data.address());
 }
 
 //!Instruction mov_rm32_r32 behavior method.
 void ac_behavior( mov_rm32_r32 )
 {
-	printManager.printReg2MReg1("MOV RM16, R16","MOV RM32, R32","MOV","MOV");
-	dataManager.setMemOrReg2(dataManager.getReg1());
+  printManager.printReg2MReg1("MOV RM16, R16","MOV RM32, R32","MOV","MOV");
+  dataManager.setMemOrReg2(dataManager.getReg1());
 }
+
 
 //!Instruction mov_r32_rm32 behavior method.
 void ac_behavior( mov_r32_rm32 )
@@ -2162,9 +2187,8 @@ void ac_behavior( mov_r32_rm32 )
 void ac_behavior( mov_EAX_imm32 )
 {
   uint i = dataManager.getImmediate();
-  //printf("NO AX:%i\n",i);
+  printf("Teste EAX: %i\n",i);
   printManager.printImm("MOV AX, IMM16","MOV EAX, IMM32","MOV AX,","MOV EAX,",i);
-   //GR[AX] = i;
   writeRegister(EAX, i);
 }
 
@@ -2172,6 +2196,7 @@ void ac_behavior( mov_EAX_imm32 )
 void ac_behavior( mov_ECX_imm32 )
 {
   uint i = dataManager.getImmediate();
+  printf("Teste ECX: %i\n",i);
   printManager.printImm("MOV CX, IMM16","MOV ECX, IMM32","MOV CX,","MOV ECX,",i);
   writeRegister(ECX, i);
 }
@@ -2180,6 +2205,7 @@ void ac_behavior( mov_ECX_imm32 )
 void ac_behavior( mov_EDX_imm32 )
 {
   uint i = dataManager.getImmediate();
+  printf("Teste EDX: %i\n",i);
   printManager.printImm("MOV DX, IMM16","MOV EDX, IMM32","MOV DX,","MOV EDX,",i);
   writeRegister(EDX, i);
 }
@@ -2188,6 +2214,7 @@ void ac_behavior( mov_EDX_imm32 )
 void ac_behavior( mov_EBX_imm32 )
 {
   uint i = dataManager.getImmediate();
+  printf("Teste EBX: %i\n",i);
   printManager.printImm("MOV BX, IMM16","MOV EBX, IMM32","MOV BX,","MOV EBX,",i);
   writeRegister(EBX, i);
 }
@@ -2227,6 +2254,8 @@ void ac_behavior( mov_EDI_imm32 )
 //!Instruction mov_rm32_imm32 behavior method.
 void ac_behavior( mov_rm32_imm32 )
 {
+
+  printf("É aqui!!!!!\n");
   uint i = dataManager.getImmediate();
   printManager.printReg2MImm("MOV RM16, IMM16","MOV RM32, IMM32","MOV","MOV",i);
   dataManager.setMemOrReg2(i);
