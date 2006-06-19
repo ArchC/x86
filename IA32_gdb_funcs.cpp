@@ -1,3 +1,27 @@
+/**
+ * @file      IA32_gdb_funcs.cpp
+ * @author    Rodolfo Jardim de Azevedo
+ *            Team 03 - MC723 - 2005, 1st period
+ *              Eduardo Uemura Okada
+ *              Andre Deiano Pansani
+ *              Ricardo Andrade
+ *
+ *            The ArchC Team
+ *            http://www.archc.org/
+ *
+ *            Computer Systems Laboratory (LSC)
+ *            IC-UNICAMP
+ *            http://www.lsc.ic.unicamp.br
+ *
+ * @version   version?
+ * @date      Mon, 19 Jun 2006 15:33:29 -0300
+ * 
+ * @brief     The ArchC x86 functional model.
+ * 
+ * @attention Copyright (C) 2002-2006 --- The ArchC Team
+ *
+ */
+
 #include "IA32.H"
 
 

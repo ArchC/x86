@@ -1,3 +1,27 @@
+/**
+ * @file      file?
+ * @author    Rodolfo Jardim de Azevedo
+ *            Team 03 - MC723 - 2005, 1st period
+ *              Eduardo Uemura Okada
+ *              Andre Deiano Pansani
+ *              Ricardo Andrade
+ *
+ *            The ArchC Team
+ *            http://www.archc.org/
+ *
+ *            Computer Systems Laboratory (LSC)
+ *            IC-UNICAMP
+ *            http://www.lsc.ic.unicamp.br
+ *
+ * @version   version?
+ * @date      date?
+ * 
+ * @brief     The ArchC x86 functional model.
+ * 
+ * @attention Copyright (C) 2002-2006 --- The ArchC Team
+ *
+ */
+
 // Assumpmitions:
 //
 // Memory is treated as processor internal as of  this  functional  model.  And  no

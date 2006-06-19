@@ -1,3 +1,32 @@
+/**
+ * @file      file?
+ * @author    Rodolfo Jardim de Azevedo
+ *            Team 03 - MC723 - 2005, 1st period
+ *              Eduardo Uemura Okada
+ *              Andre Deiano Pansani
+ *              Ricardo Andrade
+ *            Modified by Rafael Madeira
+ *              readRegister8();
+ *              writeRegister8();
+ *              void ac_behavior( Type_op1bi )
+ *              DataManager
+ *
+ *            The ArchC Team
+ *            http://www.archc.org/
+ *
+ *            Computer Systems Laboratory (LSC)
+ *            IC-UNICAMP
+ *            http://www.lsc.ic.unicamp.br
+ *
+ * @version   version?
+ * @date      date?
+ * 
+ * @brief     The ArchC x86 functional model.
+ * 
+ * @attention Copyright (C) 2002-2006 --- The ArchC Team
+ *
+ */
+
 AC_ISA(IA32)
 {
   // No SSE2, SSE, MMX or System specific instructions declared
