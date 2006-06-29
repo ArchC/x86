@@ -1,5 +1,5 @@
 /**
- * @file      file?
+ * @file      ia32.ac
  * @author    Rodolfo Jardim de Azevedo
  *            Team 03 - MC723 - 2005, 1st period
  *              Eduardo Uemura Okada
@@ -13,8 +13,8 @@
  *            IC-UNICAMP
  *            http://www.lsc.ic.unicamp.br
  *
- * @version   version?
- * @date      date?
+ * @version   1.0
+ * @date      Thu, 29 Jun 2006 14:49:06 -0300
  * 
  * @brief     The ArchC x86 functional model.
  * 
