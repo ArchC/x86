@@ -1,6 +1,7 @@
 /**
  * @file      IA32-isa.cpp
  * @author    Rodolfo Jardim de Azevedo
+ *            Valdiney Alves Pimenta (ArchC 2.0 port, new instructions, some fixed bugs)
  *            Team 03 - MC723 - 2005, 1st period
  *              Eduardo Uemura Okada
  *              Andre Deiano Pansani
@@ -27,8 +28,9 @@
  *
  */
 
-#include "IA32-isa.H"
-#include "ac_isa_init.cpp"
+#include "IA32_isa.H"
+#include "IA32_isa_init.cpp"
+#include "IA32_bhv_macros.H"
 #include <math.h>
 
 // Register definitions to register bank GR:8
@@ -68,6 +70,7 @@
 #define EFLAGS 0
 #define EIP 1
 #define FLAG_CF (1)
+#define FLAG_RESERVED_1 (1<<1)
 #define FLAG_PF (1<<2)
 #define FLAG_AF (1<<4)
 #define FLAG_ZF (1<<6)
@@ -110,6 +113,8 @@
 #define VERBOSE 1
 #define GENERICVERBOSE 0
 #define OUTSTREAM stderr
+
+using namespace IA32_parms;
 
 // Auxiliar functions and data structures
 
@@ -279,7 +284,7 @@ bool testBit ( uint array, long index )
   return false;
 }
 
-bool testMemBit ( uint address, long index )
+bool testMemBit (ac_memport<ac_word, ac_Hword> &MEM, uint address, long index )
 {
   uint realAddress = (uint)(address + (index/8));
   long realIndex = index%8;
@@ -296,7 +301,7 @@ void setBit ( uint *array, long index )
   (*array) = (*array)|mask;
 }
 
-void setMemBit ( uint address, long index )
+void setMemBit (ac_memport<ac_word, ac_Hword> &MEM, uint address, long index )
 {
   uint realAddress = (uint)(address + (index/8));
   long realIndex = index%8;
@@ -313,7 +318,7 @@ void resetBit ( uint *array, long index )
   (*array) = (*array)&mask;
 }
 
-void resetMemBit ( uint address, long index )
+void resetMemBit (ac_memport<ac_word, ac_Hword> &MEM, uint address, long index )
 {
   uint realAddress = (uint)(address + (index/8));
   long realIndex = index%8;
@@ -329,16 +334,16 @@ void compBit ( uint *array, long index )
   else setBit(array,index);
 }
 
-void compMemBit ( uint address, long index )
+void compMemBit (ac_memport<ac_word, ac_Hword> &MEM,  uint address, long index )
 {
-  if ( testMemBit(address,index) ) resetMemBit ( address,index );
-  else setMemBit ( address, index );
+  if ( testMemBit(MEM, address,index) ) resetMemBit(MEM,  address,index );
+  else setMemBit(MEM,  address, index );
 }
 
 // ----------------------------------------------------------------------------
 // Stack functions ------------------------------------------------------------
 // ----------------------------------------------------------------------------
-void push ( uint d )
+void push (ac_memport<ac_word, ac_Hword> &MEM, ac_regbank<8, ac_word, ac_Dword> & GR, uint d )
 {
   uint temp;
   if ( OperandSize == OPERAND_SIZE16 )
@@ -355,7 +360,7 @@ void push ( uint d )
     }
 }
 
-uint pop()
+uint pop(ac_memport<ac_word, ac_Hword> &MEM, ac_regbank<8, ac_word, ac_Dword> & GR)
 {
   signed short r16;
   signed int aux;
@@ -379,11 +384,11 @@ uint pop()
       GR.write(ESP,temp+4);
       if ((GR.read(ESP) == STACK_BOTTOM) && (ret == 0xCC00))
 	{
-	  fprintf(stderr,"ArchC: Simulation terminated, found end of program.\n");
-	  ac_stop(0);
-	  fprintf ( stderr, "\n" );
-	  PrintStat();
-	  fprintf ( stderr, "\n" );
+	  fprintf(stderr,"ArchC: Simulation terminated, found end of program. (Need to be fixed. ac_stop doesn't work in this version!)\n");
+	  //stop(0);
+	  //fprintf ( stderr, "\n" );
+	  //PrintStat();
+	  //fprintf ( stderr, "\n" );
 	  exit(1);
 	}
     }
@@ -393,37 +398,38 @@ uint pop()
 // ----------------------------------------------------------------------------
 // Flag behavior functions ----------------------------------------------------
 // ----------------------------------------------------------------------------
-void setFlag ( uint flagId )
+void setFlag (ac_regbank<2, ac_word, ac_Dword>& SPR, uint flagId )
 {
   uint temp = SPR.read(EFLAGS)|flagId;
   SPR.write(EFLAGS,temp);
 }
 
-void resetFlag ( uint flagId )
+void resetFlag (ac_regbank<2, ac_word, ac_Dword>& SPR, uint flagId )
 {
   uint temp = SPR.read(EFLAGS)&(~flagId);
   SPR.write(EFLAGS,temp);
 }
 
-void writeFlag ( uint flagId, bool val )
+void writeFlag (ac_regbank<2, ac_word, ac_Dword>& SPR, uint flagId, bool val )
 {
-  if ( val ) setFlag(flagId);
-  else resetFlag(flagId);
+  if ( val ) setFlag(SPR, flagId);
+  else resetFlag(SPR, flagId);
 }
 
-void compFlag ( uint flagId )
+void compFlag (ac_regbank<2, ac_word, ac_Dword>& SPR, uint flagId )
 {
   uint temp = SPR.read(EFLAGS);
-  if (temp&flagId) resetFlag(flagId);
-  else setFlag(flagId);
+  if (temp&flagId) resetFlag(SPR, flagId);
+  else setFlag(SPR, flagId);
 }
 
-bool testFlag ( uint flagId )
+bool testFlag (ac_regbank<2, ac_word, ac_Dword>& SPR, uint flagId )
 {
   uint temp = SPR.read(EFLAGS);
   if ( temp & flagId ) return true;
   return false;
 }
+
 
 bool checkParity ( uint res )
 {
@@ -589,9 +595,9 @@ bool checkOverflow8 ( uint oper, uint op1, uint op2, uint res )
       return false;
       break;
     case OPER_SUB:
-      sop2 = -sop2;
-      if ( (sop1<0) && (sop2<0) && (sres>0) ) return true;
-      if ( (sop1>0) && (sop2>0) && (sres<0) ) return true;
+      int inv_sop2 = -sop2;
+      if ( (sop1<0) && (inv_sop2<0) && (sres>0) ) return true;
+      if ( (sop1>0) && (inv_sop2>0) && (sres<0) ) return true;
       return false;
       break;
     case OPER_MUL:
@@ -602,41 +608,41 @@ bool checkOverflow8 ( uint oper, uint op1, uint op2, uint res )
   return false;
 }
 
-void checkFlags8 ( uint oper, uint op1, uint op2, uint res, uint flags )
+void checkFlags8 (ac_regbank<2, ac_word, ac_Dword>& SPR,  uint oper, uint op1, uint op2, uint res, uint flags )
 {
-  if ( flags&FLAG_CF ) writeFlag(FLAG_CF, checkCarry8(oper,op1,op2,res));
-  if ( flags&FLAG_PF ) writeFlag(FLAG_PF, checkParity(res));
-  if ( flags&FLAG_AF ) writeFlag(FLAG_AF, checkAdjust(oper,op1,op2,res));
-  if ( flags&FLAG_ZF ) writeFlag(FLAG_ZF, !res);
-  if ( flags&FLAG_SF ) writeFlag(FLAG_SF, MSB8(res));
-  if ( flags&FLAG_OF ) writeFlag(FLAG_OF, checkOverflow8(oper,op1,op2,res));
+  if ( flags&FLAG_CF ) writeFlag(SPR, FLAG_CF, checkCarry8(oper,op1,op2,res));
+  if ( flags&FLAG_PF ) writeFlag(SPR, FLAG_PF, checkParity(res));
+  if ( flags&FLAG_AF ) writeFlag(SPR, FLAG_AF, checkAdjust(oper,op1,op2,res));
+  if ( flags&FLAG_ZF ) writeFlag(SPR, FLAG_ZF, !res);
+  if ( flags&FLAG_SF ) writeFlag(SPR, FLAG_SF, MSB8(res));
+  if ( flags&FLAG_OF ) writeFlag(SPR, FLAG_OF, checkOverflow8(oper,op1,op2,res));
 }
 
-void checkFlags ( uint oper, uint op1, uint op2, uint res, uint flags )
+void checkFlags (ac_regbank<2, ac_word, ac_Dword>& SPR,  uint oper, uint op1, uint op2, uint res, uint flags )
 {
   if ( flags&FLAG_CF )
     {
       if ( OperandSize == OPERAND_SIZE16 )
-	writeFlag(FLAG_CF, checkCarry16(oper,op1,op2,res) );
+	writeFlag(SPR, FLAG_CF, checkCarry16(oper,op1,op2,res) );
       else if ( OperandSize == OPERAND_SIZE32 )
-	writeFlag(FLAG_CF, checkCarry(oper,op1,op2,res) );
+	writeFlag(SPR, FLAG_CF, checkCarry(oper,op1,op2,res) );
     }
-  if ( flags&FLAG_PF ) writeFlag(FLAG_PF, checkParity(res));
-  if ( flags&FLAG_AF ) writeFlag(FLAG_AF, checkAdjust(oper,op1,op2,res) );
-  if ( flags&FLAG_ZF ) writeFlag(FLAG_ZF, !res);
+  if ( flags&FLAG_PF ) writeFlag(SPR, FLAG_PF, checkParity(res));
+  if ( flags&FLAG_AF ) writeFlag(SPR, FLAG_AF, checkAdjust(oper,op1,op2,res) );
+  if ( flags&FLAG_ZF ) writeFlag(SPR, FLAG_ZF, !res);
   if ( flags&FLAG_SF )
     {
       if ( OperandSize == OPERAND_SIZE16 )
-	writeFlag(FLAG_SF, MSB16(res));
+	writeFlag(SPR, FLAG_SF, MSB16(res));
       else if ( OperandSize == OPERAND_SIZE32 )
-	writeFlag(FLAG_SF, MSB32(res));
+	writeFlag(SPR, FLAG_SF, MSB32(res));
     }
   if ( flags&FLAG_OF )
     {
       if ( OperandSize == OPERAND_SIZE16 )
-	writeFlag(FLAG_OF, checkOverflow16(oper,op1,op2,res));
+	writeFlag(SPR, FLAG_OF, checkOverflow16(oper,op1,op2,res));
       else if ( OperandSize == OPERAND_SIZE32 )
-	writeFlag(FLAG_OF, checkOverflow(oper,op1,op2,res));
+	writeFlag(SPR, FLAG_OF, checkOverflow(oper,op1,op2,res));
     }
 }
 
@@ -646,7 +652,7 @@ void checkFlags ( uint oper, uint op1, uint op2, uint res, uint flags )
 //----------------------------------
                                                                                                           
 
-void setFlags_af(uint flag,uint reg){
+void setFlags_af(ac_regbank<2, ac_word, ac_Dword>& SPR,  uint flag,uint reg){
 
 /*****
 Function to set 'flag' according to the 
@@ -654,13 +660,13 @@ resulting binary value in the 'reg' register
 *****/
 
   if ( flag&FLAG_SF )
-    if ( reg >= 0 ) resetFlag( FLAG_CF );
-    else setFlag( FLAG_CF );
+    if ( reg >= 0 ) resetFlag(SPR,  FLAG_CF );
+    else setFlag(SPR,  FLAG_CF );
   if ( flag&FLAG_ZF )
-    if ( reg == 0 ) setFlag( FLAG_ZF );
-    else resetFlag( FLAG_ZF );
+    if ( reg == 0 ) setFlag(SPR,  FLAG_ZF );
+    else resetFlag(SPR,  FLAG_ZF );
   if ( flag&FLAG_PF )
-    writeFlag(FLAG_PF,checkParity( reg ));
+    writeFlag(SPR, FLAG_PF,checkParity( reg ));
 }//setFlag                                                                                                                               
 
 //-----------------------------------                                                                                                    
@@ -670,7 +676,7 @@ resulting binary value in the 'reg' register
 // Generic processed data to instructions abstraction -------------------------
 // ----------------------------------------------------------------------------
 
-uint readMemory(uint a)
+uint readMemory(ac_memport<ac_word, ac_Hword> &MEM, uint a)
 {
   signed int aux;
   signed short aux16;
@@ -686,7 +692,7 @@ uint readMemory(uint a)
   return aux;
 }
 
-uint readMemory16(uint a)
+uint readMemory16(ac_memport<ac_word, ac_Hword> &MEM, uint a)
 {
   signed int aux;
   signed short aux16;
@@ -695,7 +701,7 @@ uint readMemory16(uint a)
   return aux;
 }
 
-uint readMemory8(uint a)
+uint readMemory8(ac_memport<ac_word, ac_Hword> &MEM, uint a)
 {
   signed char aux8;
   signed int aux;
@@ -704,7 +710,7 @@ uint readMemory8(uint a)
   return aux;
 }
 
-void writeMemory(uint a, uint val)
+void writeMemory(ac_memport<ac_word, ac_Hword> &MEM, uint a, uint val)
 {
   unsigned short aux16 = (val & MASK_16BITS);
   if ( OperandSize == OPERAND_SIZE16 )
@@ -713,17 +719,17 @@ void writeMemory(uint a, uint val)
     MEM.write(a, val);
 }
 
-void writeMemory8(uint a, uint val)
+void writeMemory8(ac_memport<ac_word, ac_Hword> &MEM, uint a, uint val)
 {
   MEM.write_byte(a, (val & MASK_8BITS));
 }
 
-uint readSPRegister(uint reg)
+uint readSPRegister(ac_regbank<2, ac_word, ac_Dword>& SPR, uint reg)
 {
   return (SPR.read(reg));
 }
 
-void writeSPRegister(uint reg, uint val)
+void writeSPRegister(ac_regbank<2, ac_word, ac_Dword>& SPR, uint reg, uint val)
 {
   if ( OperandSize == OPERAND_SIZE16 )
     SPR.write(reg, (SPR.read(reg)&0xFFFF0000)|(val&MASK_16BITS));
@@ -731,17 +737,17 @@ void writeSPRegister(uint reg, uint val)
     SPR.write(reg, val);
 }
 
-uint readSRegister(uint reg)
+uint readSRegister(ac_regbank<6, ac_word, ac_Dword>& SR, uint reg)
 {
   return (SR.read(reg) & MASK_16BITS);
 }
 
-void writeSRegister(uint reg, uint val)
+void writeSRegister(ac_regbank<6, ac_word, ac_Dword>& SR, uint reg, uint val)
 {
   SR.write(reg, (val & MASK_16BITS));
 }
 
-uint readRegister8(uint reg)
+uint readRegister8(ac_regbank<8, ac_word, ac_Dword> & GR, uint reg)
 {
   signed char aux8;
   signed int aux;
@@ -783,7 +789,7 @@ uint readRegister8(uint reg)
   return INVALID_REGISTER;
 }
 
-uint readRegister(uint reg)
+uint readRegister(ac_regbank<8, ac_word, ac_Dword> & GR, uint reg)
 {
   signed int aux;
   signed short aux16;
@@ -814,7 +820,7 @@ uint readRegister(uint reg)
   return INVALID_REGISTER;
 }
 
-void writeRegister8(uint reg, uint val)
+void writeRegister8(ac_regbank<8, ac_word, ac_Dword> & GR, uint reg, uint val)
 {
 
  
@@ -844,7 +850,7 @@ void writeRegister8(uint reg, uint val)
     }
 }
 
-void writeRegister(uint reg, uint val)
+void writeRegister(ac_regbank<8, ac_word, ac_Dword> & GR, uint reg, uint val)
 {
   if ( OperandSize == OPERAND_SIZE16 )
     {
@@ -897,33 +903,24 @@ public:
   void address(uint a) {Address=a;};
   unsigned char address8() {return Address8;};
   void address8(unsigned char a) {Address8=a;};
-  uint immediate() {
+  uint immediate(ac_regbank<2, ac_word, ac_Dword>& SPR, ac_reg<unsigned>& ac_pc) {
     //    ac_pc+=4; SPR.write(EIP,(int)ac_pc); 
-    
     if ( OperandSize == OPERAND_SIZE16){
       ac_pc+=2; SPR.write(EIP,(int)ac_pc); 
       acprintf("Size 16\n");
-     
     }
     else if (OperandSize == OPERAND_SIZE32){
       ac_pc+=4; SPR.write(EIP,(int)ac_pc); 
       acprintf("Size 32\n");
-     
-  }
-  
+    }
     return Immediate;
   };
   void immediate(signed int i) {Immediate=i;};
-  uint immediate8() {ac_pc+=1; SPR.write(EIP,(int)ac_pc); return Immediate8;};
+  uint immediate8(ac_regbank<2, ac_word, ac_Dword>& SPR, ac_reg<unsigned>& ac_pc) {ac_pc+=1; SPR.write(EIP,(int)ac_pc); return Immediate8;};
   void immediate8(signed char i) {Immediate8=i;};
-  uint immediate16() {ac_pc+=2; SPR.write(EIP,(int)ac_pc);return Immediate16;};
+  uint immediate16(ac_regbank<2, ac_word, ac_Dword>& SPR, ac_reg<unsigned>& ac_pc) {ac_pc+=2; SPR.write(EIP,(int)ac_pc);return Immediate16;};
   void immediate16(signed char i) {Immediate16=i;};
-  void immediates(signed int i)
-  {
-    immediate(i);
-    immediate16(i);
-    immediate8(i);
-  };
+  void immediates(signed int i) { immediate(i); immediate16(i); immediate8(i);};
   uint acpc_inc;
 };
 
@@ -937,38 +934,48 @@ class DataManager
 public:
   DataManager(){};
   ~DataManager(){};
-  uint getMemOrReg1()
+  
+  uint getMemOrReg1(ac_memport<ac_word, ac_Hword> &MEM, ac_regbank<8, ac_word, ac_Dword> & GR)
   {
-    if ( data.usesMemory() ) return readMemory(data.address());
-    return readRegister(data.reg1());
+    if ( data.usesMemory() ) return readMemory(MEM, data.address());
+    return readRegister(GR, data.reg1());
   }
-  uint getMemOrReg2()
+  
+  uint getMemOrReg2(ac_memport<ac_word, ac_Hword> &MEM, ac_regbank<8, ac_word, ac_Dword> & GR)
   {
-    if ( data.usesMemory() ) return readMemory(data.address());
-    return readRegister(data.reg2());
+    if ( data.usesMemory() ) return readMemory(MEM, data.address());
+    return readRegister(GR, data.reg2());
   }
-  uint getReg1() { return readRegister(data.reg1()); };
-  uint getReg2() { return readRegister(data.reg2()); };
-  uint getImmediate()
+  
+  uint getReg1(ac_regbank<8, ac_word, ac_Dword> & GR) { return readRegister(GR, data.reg1()); };
+  
+  uint getReg2(ac_regbank<8, ac_word, ac_Dword> & GR) { return readRegister(GR, data.reg2()); };
+  
+  uint getImmediate(ac_regbank<2, ac_word, ac_Dword>& SPR, ac_reg<unsigned>& ac_pc)
   {
-    //    if ( OperandSize == OPERAND_SIZE16 ) return data.immediate16();
-    if ( OperandSize == OPERAND_SIZE16 ) return data.immediate();
-    else if ( OperandSize == OPERAND_SIZE32 ) return data.immediate();
-    return data.immediate();
+    //    if ( OperandSize == OPERAND_SIZE16 ) return data.immediate16(SPR, ac_pc);
+    if ( OperandSize == OPERAND_SIZE16 ) return data.immediate(SPR, ac_pc);
+    else if ( OperandSize == OPERAND_SIZE32 ) return data.immediate(SPR, ac_pc);
+    return data.immediate(SPR, ac_pc);
   }
-  void setMemOrReg1(uint val)
+  
+  void setMemOrReg1(ac_memport<ac_word, ac_Hword> &MEM, ac_regbank<8, ac_word, ac_Dword> & GR, uint val)
   {
-    if ( data.usesMemory() ) writeMemory(data.address(),val);
-    else writeRegister(data.reg1(),val);
+    if ( data.usesMemory() ) writeMemory(MEM, data.address(),val);
+    else writeRegister(GR, data.reg1(),val);
   }
-  void setMemOrReg2(uint val)
+  
+  void setMemOrReg2(ac_memport<ac_word, ac_Hword> &MEM, ac_regbank<8, ac_word, ac_Dword> & GR, uint val)
   {
-    if ( data.usesMemory() ) writeMemory(data.address(),val);
-    else writeRegister(data.reg2(),val);
+    if ( data.usesMemory() ) writeMemory(MEM, data.address(),val);
+    else writeRegister(GR, data.reg2(),val);
   }
-  void setMem(uint val) { writeMemory(data.address(),val);}
-  void setReg1(uint val) { writeRegister(data.reg1(),val); }
-  void setReg2(uint val) { writeRegister(data.reg2(),val); }
+  
+  void setMem(ac_memport<ac_word, ac_Hword> &MEM, uint val) { writeMemory(MEM, data.address(),val);}
+  
+  void setReg1(ac_regbank<8, ac_word, ac_Dword> & GR, uint val) { writeRegister(GR, data.reg1(),val); }
+  
+  void setReg2(ac_regbank<8, ac_word, ac_Dword> & GR, uint val) { writeRegister(GR, data.reg2(),val); }
 };
 
 DataManager dataManager;
@@ -1108,7 +1115,7 @@ signed int signExtend8 ( unsigned int i )
   return i;
 }
 
-uint processSib(uint mod, uint sib, uint disp, uint imm, bool *used)
+uint processSib(ac_regbank<8, ac_word, ac_Dword> & GR, ac_reg<unsigned>& ac_pc, uint mod, uint sib, uint disp, uint imm, bool *used)
 {
   uint ss = (sib>>6);
   uint index = (sib>>3)&(0x07);
@@ -1137,7 +1144,7 @@ uint processSib(uint mod, uint sib, uint disp, uint imm, bool *used)
   return baseValue + scaledIndex;
 }
 
-void processData(uint mod, uint regop, uint rm, uint sib, uint disp, uint imm)
+void processData(ac_regbank<8, ac_word, ac_Dword> & GR, ac_reg<unsigned>& ac_pc, uint mod, uint regop, uint rm, uint sib, uint disp, uint imm)
 {
   bool used = false;
   uint disp8, disp32;
@@ -1151,7 +1158,7 @@ void processData(uint mod, uint regop, uint rm, uint sib, uint disp, uint imm)
       switch(rm)
 	{
 	case 0x04:	// SIB
-	  data.address(processSib(mod,sib,disp,imm,&used));
+	  data.address(processSib(GR, ac_pc, mod,sib,disp,imm,&used));
 	  data.acpc_inc+=2;
 	  ac_pc+= 2;
 	  if ( !used ) data.immediates(disp);
@@ -1176,7 +1183,7 @@ void processData(uint mod, uint regop, uint rm, uint sib, uint disp, uint imm)
       switch(rm)
 	{
 	case 0x04:	// SIB+DISP8
-	  data.address(processSib(mod,sib,disp,imm,&used) + (signed)disp8);
+	  data.address(processSib(GR, ac_pc, mod,sib,disp,imm,&used) + (signed)disp8);
 	  data.acpc_inc+=3;
 	  ac_pc+= 3;
 	  data.immediates((imm<<24)|((disp>>8)&MASK_8BITS));
@@ -1195,7 +1202,7 @@ void processData(uint mod, uint regop, uint rm, uint sib, uint disp, uint imm)
       switch(rm)
 	{
 	case 0x04:	// SIB+DISP32
-	  data.address(processSib(mod,sib,disp,imm,&used) + (signed)disp32);
+	  data.address(processSib(GR, ac_pc, mod,sib,disp,imm,&used) + (signed)disp32);
 	  data.acpc_inc+=6;
 	  ac_pc+= 6;
 	  data.immediates(imm);
@@ -1243,10 +1250,11 @@ void ac_behavior( begin )
   
   // Setting IF behavior flag
   IFJustSet = NOT_SET;
-  setFlag(FLAG_IF);
+  setFlag(SPR, FLAG_IF);
+  setFlag(SPR, FLAG_RESERVED_1); //always set according Intel DatSheet
   
   // Setting OS return control (end of program)
-  push(0xCC00);
+  push(MEM, GR, 0xCC00);
 };
 
 //!Behavior executed after simulation ends.
@@ -1259,7 +1267,7 @@ void ac_behavior( instruction )
   if (IFJustSet == RUNONCE)
     {
       IFJustSet = NOT_SET;
-      setFlag(FLAG_IF);
+      setFlag(SPR, FLAG_IF);
     }
   if (IFJustSet == JUST_SET) IFJustSet = RUNONCE;
   // OperandSize attribute behavior implementation
@@ -1313,13 +1321,13 @@ void ac_behavior( Type_op2bd32 )
 }
 void ac_behavior( Type_op1b_rm32 )
 {
-  processData(mod,regop,rm,sib,disp,imm);
+  processData(GR, ac_pc, mod,regop,rm,sib,disp,imm);
   ac_pc+=1;
   SPR.write(EIP,(int)ac_pc);
 }
 void ac_behavior( Type_op2b_rm32 )
 {
-  processData(mod2,regop2,rm2,sib2,disp2,imm2);
+  processData(GR, ac_pc, mod2,regop2,rm2,sib2,disp2,imm2);
   ac_pc+=2;
   SPR.write(EIP,(int)ac_pc);
 }
@@ -1353,7 +1361,7 @@ void ac_behavior( outsd )
 void ac_behavior( stc )
 {
   printManager.print ( "STC" );
-  setFlag(FLAG_CF);
+  setFlag(SPR, FLAG_CF);
 }
 
 // Debug ok
@@ -1361,7 +1369,7 @@ void ac_behavior( stc )
 void ac_behavior( clc )
 {
   printManager.print ( "CLC" );
-  resetFlag(FLAG_CF);
+  resetFlag(SPR, FLAG_CF);
 }
 
 // Debug ok
@@ -1369,7 +1377,7 @@ void ac_behavior( clc )
 void ac_behavior( cmc )
 {
   printManager.print ( "CMC" );
-  compFlag(FLAG_CF);
+  compFlag(SPR, FLAG_CF);
 }
 
 // Debug ok
@@ -1377,7 +1385,7 @@ void ac_behavior( cmc )
 void ac_behavior( cld )
 {
   printManager.print ( "CLD" );
-  resetFlag(FLAG_DF);
+  resetFlag(SPR, FLAG_DF);
 }
 
 // Debug ok
@@ -1385,7 +1393,7 @@ void ac_behavior( cld )
 void ac_behavior( std )
 {
   printManager.print ( "STD" );
-  setFlag(FLAG_DF);
+  setFlag(SPR, FLAG_DF);
 }
 
 //!Instruction lahf behavior method.
@@ -1405,7 +1413,7 @@ void ac_behavior( sahf )
 void ac_behavior( pushfd )
 {
   printManager.print("PUSHF", "PUSHFD");
-  push(readSPRegister(EFLAGS));
+  push(MEM, GR, readSPRegister(SPR, EFLAGS));
 }
 
 // Debug 16/32 ok
@@ -1413,8 +1421,8 @@ void ac_behavior( pushfd )
 void ac_behavior( popfd )
 {
 	printManager.print("POPF", "POPFD");
-	uint aux = pop();
-	writeSPRegister(EFLAGS, aux);
+	uint aux = pop(MEM, GR);
+	writeSPRegister(SPR, EFLAGS, aux);
 }
 
 // Debug ok
@@ -1431,7 +1439,7 @@ void ac_behavior( cli )
 {
 	printManager.print ( "CLI" );
 	IFJustSet = NOT_SET;
-	resetFlag(FLAG_IF);
+	resetFlag(SPR, FLAG_IF);
 }
 
 // Debug ok
@@ -1452,7 +1460,7 @@ void ac_behavior( xlatb )
 void ac_behavior( push_EAX )
 {
 	printManager.print ( "PUSH AX", "PUSH EAX" );
-	push ( readRegister(EAX) );
+	push(MEM, GR,  readRegister(GR, EAX) );
 }
 
 // Debug ok
@@ -1460,7 +1468,7 @@ void ac_behavior( push_EAX )
 void ac_behavior( push_ECX )
 {
 	printManager.print ( "PUSH CX", "PUSH ECX" );
-	push ( readRegister(ECX) );
+	push(MEM, GR,  readRegister(GR, ECX) );
 }
 
 // Debug ok
@@ -1468,7 +1476,7 @@ void ac_behavior( push_ECX )
 void ac_behavior( push_EDX )
 {
 	printManager.print ( "PUSH DX", "PUSH EDX" );
-	push ( readRegister(EDX) );
+	push(MEM, GR,  readRegister(GR, EDX) );
 }
 
 // Debug ok
@@ -1476,7 +1484,7 @@ void ac_behavior( push_EDX )
 void ac_behavior( push_EBX )
 {
 	printManager.print ( "PUSH BX", "PUSH EBX" );
-	push ( readRegister(EBX) );
+	push(MEM, GR,  readRegister(GR, EBX) );
 }
 
 // Debug ok
@@ -1484,7 +1492,7 @@ void ac_behavior( push_EBX )
 void ac_behavior( push_ESP )
 {
 	printManager.print ( "PUSH SP", "PUSH ESP" );
-	push ( readRegister(ESP) );
+	push(MEM, GR,  readRegister(GR, ESP) );
 }
 
 // Debug ok
@@ -1492,7 +1500,7 @@ void ac_behavior( push_ESP )
 void ac_behavior( push_EBP )
 {
 	printManager.print ( "PUSH BP", "PUSH EBP" );
-	push ( readRegister(EBP) );
+	push(MEM, GR,  readRegister(GR, EBP) );
 }
 
 // Debug ok
@@ -1500,7 +1508,7 @@ void ac_behavior( push_EBP )
 void ac_behavior( push_ESI )
 {
 	printManager.print ( "PUSH SI", "PUSH ESI" );
-	push ( readRegister(ESI) );
+	push(MEM, GR,  readRegister(GR, ESI) );
 }
 
 // Debug ok
@@ -1508,7 +1516,7 @@ void ac_behavior( push_ESI )
 void ac_behavior( push_EDI )
 {
 	printManager.print ( "PUSH DI", "PUSH EDI" );
-	push ( readRegister(EDI) );
+	push(MEM, GR,  readRegister(GR, EDI) );
 }
 
 // Debug ok
@@ -1517,7 +1525,7 @@ void ac_behavior( push_CS )
 {
 	printManager.print ( "PUSH CS" );
 	OperandSize = OPERAND_SIZE16;
-        push ( readSRegister(CS) );
+        push(MEM, GR,  readSRegister(SR, CS) );
 }
 
 // Debug ok
@@ -1526,7 +1534,7 @@ void ac_behavior( push_SS )
 {
 	printManager.print ( "PUSH SS" );
 	OperandSize = OPERAND_SIZE16;
-	push ( readSRegister(CS) );
+	push(MEM, GR,  readSRegister(SR, CS) );
 }
 
 // Debug ok
@@ -1535,7 +1543,7 @@ void ac_behavior( push_DS )
 {
 	printManager.print ( "PUSH DS" );
 	OperandSize = OPERAND_SIZE16;
-	push ( readSRegister(DS) );
+	push(MEM, GR,  readSRegister(SR, DS) );
 }
 
 // Debug ok
@@ -1544,7 +1552,7 @@ void ac_behavior( push_ES )
 {
 	printManager.print ( "PUSH ES" );
 	OperandSize = OPERAND_SIZE16;
-	push ( readSRegister(ES) );
+	push(MEM, GR,  readSRegister(SR, ES) );
 }
 
 // Debug ok
@@ -1552,7 +1560,7 @@ void ac_behavior( push_ES )
 void ac_behavior( pop_EAX )
 {
 	printManager.print ( "POP AX", "POP EAX" );
-	writeRegister(EAX,pop());
+	writeRegister(GR, EAX,pop(MEM, GR));
 }
 
 // Debug ok
@@ -1560,7 +1568,7 @@ void ac_behavior( pop_EAX )
 void ac_behavior( pop_ECX )
 {
 	printManager.print ( "POP CX", "POP ECX" );
-	writeRegister(ECX,pop());
+	writeRegister(GR, ECX,pop(MEM, GR));
 }
 
 // Debug ok
@@ -1568,7 +1576,7 @@ void ac_behavior( pop_ECX )
 void ac_behavior( pop_EDX )
 {
 	printManager.print ( "POP DX", "POP EDX" );
-	writeRegister(EDX,pop());
+	writeRegister(GR, EDX,pop(MEM, GR));
 }
 
 // Debug ok
@@ -1576,7 +1584,7 @@ void ac_behavior( pop_EDX )
 void ac_behavior( pop_EBX )
 {
 	printManager.print ( "POP BX", "POP EBX" );
-	writeRegister(EBX,pop());
+	writeRegister(GR, EBX,pop(MEM, GR));
 }
 
 // Debug ok
@@ -1584,7 +1592,7 @@ void ac_behavior( pop_EBX )
 void ac_behavior( pop_ESP )
 {
 	printManager.print ( "POP SP", "POP ESP" );
-	writeRegister(ESP,pop());
+	writeRegister(GR, ESP,pop(MEM, GR));
 }
 
 // Debug ok
@@ -1592,7 +1600,7 @@ void ac_behavior( pop_ESP )
 void ac_behavior( pop_EBP )
 {
 	printManager.print ( "POP BP", "POP EBP" );
-	writeRegister(EBP,pop());
+	writeRegister(GR, EBP,pop(MEM, GR));
 }
 
 // Debug ok
@@ -1600,7 +1608,7 @@ void ac_behavior( pop_EBP )
 void ac_behavior( pop_ESI )
 {
 	printManager.print ( "POP SI", "POP ESI" );
-	writeRegister(ESI,pop());
+	writeRegister(GR, ESI,pop(MEM, GR));
 }
 
 // Debug ok
@@ -1608,7 +1616,7 @@ void ac_behavior( pop_ESI )
 void ac_behavior( pop_EDI )
 {
 	printManager.print ( "POP DI", "POP EDI" );
-	writeRegister(EDI,pop());
+	writeRegister(GR, EDI,pop(MEM, GR));
 }
 
 // Debug ok
@@ -1616,7 +1624,7 @@ void ac_behavior( pop_EDI )
 void ac_behavior( pop_DS )
 {
 	printManager.print ( "POP DS" );
-	writeSRegister(DS,pop());
+	writeSRegister(SR, DS,pop(MEM, GR));
 }
 
 // Debug ok
@@ -1624,7 +1632,7 @@ void ac_behavior( pop_DS )
 void ac_behavior( pop_ES )
 {
 	printManager.print ( "POP ES" );
-	writeSRegister(ES,pop());
+	writeSRegister(SR, ES,pop(MEM, GR));
 }
 
 // Debug ok
@@ -1632,7 +1640,7 @@ void ac_behavior( pop_ES )
 void ac_behavior( pop_SS )
 {
 	printManager.print ( "POP SS" );
-	writeSRegister(SS,pop());
+	writeSRegister(SR, SS,pop(MEM, GR));
 }
 
 // Debug ok
@@ -1640,15 +1648,15 @@ void ac_behavior( pop_SS )
 void ac_behavior( push_a_ad )
 {
 	printManager.print ( "PUSHA", "PUSHAD" );
-	uint tempESP = readRegister(ESP);
-	push(readRegister(EAX));
-	push(readRegister(ECX));
-	push(readRegister(EDX));
-	push(readRegister(EBX));
-	push(tempESP);
-	push(readRegister(EBP));
-	push(readRegister(ESI));
-	push(readRegister(EDI));
+	uint tempESP = readRegister(GR, ESP);
+	push(MEM, GR, readRegister(GR, EAX));
+	push(MEM, GR, readRegister(GR, ECX));
+	push(MEM, GR, readRegister(GR, EDX));
+	push(MEM, GR, readRegister(GR, EBX));
+	push(MEM, GR, tempESP);
+	push(MEM, GR, readRegister(GR, EBP));
+	push(MEM, GR, readRegister(GR, ESI));
+	push(MEM, GR, readRegister(GR, EDI));
 }
 
 // Debug ok
@@ -1657,15 +1665,15 @@ void ac_behavior( pop_a_ad )
 {
 	printManager.print ( "POPA", "POPAD" );
 	uint tempESP;
-	writeRegister(EDI,pop());
-	writeRegister(ESI,pop());
-	writeRegister(EBP,pop());
-	tempESP = pop();
-	writeRegister(EBX,pop());
-	writeRegister(EDX,pop());
-	writeRegister(ECX,pop());
-	writeRegister(EAX,pop());
-	writeRegister(ESP,tempESP);
+	writeRegister(GR, EDI,pop(MEM, GR));
+	writeRegister(GR, ESI,pop(MEM, GR));
+	writeRegister(GR, EBP,pop(MEM, GR));
+	tempESP = pop(MEM, GR);
+	writeRegister(GR, EBX,pop(MEM, GR));
+	writeRegister(GR, EDX,pop(MEM, GR));
+	writeRegister(GR, ECX,pop(MEM, GR));
+	writeRegister(GR, EAX,pop(MEM, GR));
+	writeRegister(GR, ESP,tempESP);
 }
 
 //!Instruction in_EAX_DX behavior method.
@@ -1686,13 +1694,13 @@ void ac_behavior( cwd_cwq )
   printf ( "CWD/CDQ\n" );
   if ( OperandSize == OPERAND_SIZE16 )
     {
-      if ( MSB16(readRegister(EAX)) ) writeRegister(EDX,0xFFFF);
-      else writeRegister(EDX,0);
+      if ( MSB16(readRegister(GR, EAX)) ) writeRegister(GR, EDX,0xFFFF);
+      else writeRegister(GR, EDX,0);
     }
   else if ( OperandSize == OPERAND_SIZE32 )
     {
-      if ( MSB32(readRegister(EAX)) ) writeRegister(EDX,0xFFFFFFFF);
-      else writeRegister(EDX,0);
+      if ( MSB32(readRegister(GR, EAX)) ) writeRegister(GR, EDX,0xFFFFFFFF);
+      else writeRegister(GR, EDX,0);
     }
 }
 
@@ -1701,11 +1709,11 @@ void ac_behavior( cwd_cwq )
 void ac_behavior( inc_EAX )
 {
   printManager.print ( "INC AX", "INC EAX" );
-  uint op1 = readRegister(EAX);
+  uint op1 = readRegister(GR, EAX);
   uint op2 = 1;
   uint res = op1 + op2;
-  writeRegister(EAX, res );
-  checkFlags(OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+  writeRegister(GR, EAX, res );
+  checkFlags(SPR, OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1713,11 +1721,11 @@ void ac_behavior( inc_EAX )
 void ac_behavior( inc_ECX )
 {
 	printManager.print ( "INC CX", "INC ECX" );
-	uint op1 = readRegister(ECX);
+	uint op1 = readRegister(GR, ECX);
 	uint op2 = 1;
 	uint res = op1 + op2;
-	writeRegister(ECX,res);
-	checkFlags(OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, ECX,res);
+	checkFlags(SPR, OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1725,11 +1733,11 @@ void ac_behavior( inc_ECX )
 void ac_behavior( inc_EDX )
 {
 	printManager.print ( "INC DX", "INC EDX" );
-	uint op1 = readRegister(EDX);
+	uint op1 = readRegister(GR, EDX);
 	uint op2 = 1;
 	uint res = op1 + op2;
-	writeRegister(EDX,res);
-	checkFlags(OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, EDX,res);
+	checkFlags(SPR, OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1737,11 +1745,11 @@ void ac_behavior( inc_EDX )
 void ac_behavior( inc_EBX )
 {
 	printManager.print ( "INC BX", "INC EBX" );
-	uint op1 = readRegister(EBX);
+	uint op1 = readRegister(GR, EBX);
 	uint op2 = 1;
 	uint res = op1 + op2;
-	writeRegister(EBX,res);
-	checkFlags(OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, EBX,res);
+	checkFlags(SPR, OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1749,11 +1757,11 @@ void ac_behavior( inc_EBX )
 void ac_behavior( inc_ESP )
 {
 	printManager.print ( "INC SP", "INC ESP" );
-	uint op1 = readRegister(ESP);
+	uint op1 = readRegister(GR, ESP);
 	uint op2 = 1;
 	uint res = op1 + op2;
-	writeRegister(ESP, res);
-	checkFlags(OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, ESP, res);
+	checkFlags(SPR, OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1761,11 +1769,11 @@ void ac_behavior( inc_ESP )
 void ac_behavior( inc_EBP )
 {
 	printManager.print ( "INC BP", "INC EBP" );
-	uint op1 = readRegister(EBP);
+	uint op1 = readRegister(GR, EBP);
 	uint op2 = 1;
 	uint res = op1 + op2;
-	writeRegister(EBP, res);
-	checkFlags(OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, EBP, res);
+	checkFlags(SPR, OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1773,11 +1781,11 @@ void ac_behavior( inc_EBP )
 void ac_behavior( inc_ESI )
 {
 	printManager.print ( "INC SI", "INC ESI" );
-	uint op1 = readRegister(ESI);
+	uint op1 = readRegister(GR, ESI);
 	uint op2 = 1;
 	uint res = op1 + op2;
-	writeRegister(ESI, res);
-	checkFlags(OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, ESI, res);
+	checkFlags(SPR, OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1785,11 +1793,11 @@ void ac_behavior( inc_ESI )
 void ac_behavior( inc_EDI )
 {
 	printManager.print ( "INC DI", "INC EDI" );
-	uint op1 = readRegister(EDI);
+	uint op1 = readRegister(GR, EDI);
 	uint op2 = 1;
 	uint res = op1 + op2;
-	writeRegister(EDI, res);
-	checkFlags(OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, EDI, res);
+	checkFlags(SPR, OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1797,11 +1805,11 @@ void ac_behavior( inc_EDI )
 void ac_behavior( dec_EAX )
 {
   printManager.print ( "DEC AX", "DEC EAX" );
-  uint op1 = readRegister(EAX);
+  uint op1 = readRegister(GR, EAX);
   uint op2 = 1;
   uint res = op1 - op2;
-  writeRegister(EAX, res);
-  checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+  writeRegister(GR, EAX, res);
+  checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1809,11 +1817,11 @@ void ac_behavior( dec_EAX )
 void ac_behavior( dec_ECX )
 {
 	printManager.print ( "DEC CX", "DEC ECX" );
-	uint op1 = readRegister(ECX);
+	uint op1 = readRegister(GR, ECX);
 	uint op2 = 1;
 	uint res = op1 - op2;
-	writeRegister(ECX, res);
-	checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, ECX, res);
+	checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1821,11 +1829,11 @@ void ac_behavior( dec_ECX )
 void ac_behavior( dec_EDX )
 {
 	printManager.print ( "DEC DX", "DEC EDX" );
-	uint op1 = readRegister(EDX);
+	uint op1 = readRegister(GR, EDX);
 	uint op2 = 1;
 	uint res = op1 - op2;
-	writeRegister(EDX, res);
-	checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, EDX, res);
+	checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1833,11 +1841,11 @@ void ac_behavior( dec_EDX )
 void ac_behavior( dec_EBX )
 {
 	printManager.print ( "DEC BX", "DEC EBX" );
-	uint op1 = readRegister(EBX);
+	uint op1 = readRegister(GR, EBX);
 	uint op2 = 1;
 	uint res = op1 - op2;
-	writeRegister(EBX, res);
-	checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, EBX, res);
+	checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1845,11 +1853,11 @@ void ac_behavior( dec_EBX )
 void ac_behavior( dec_ESP )
 {
 	printManager.print ( "DEC SP", "DEC ESP" );
-	uint op1 = readRegister(ESP);
+	uint op1 = readRegister(GR, ESP);
 	uint op2 = 1;
 	uint res = op1 - op2;
-	writeRegister(ESP, res);
-	checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, ESP, res);
+	checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1857,11 +1865,11 @@ void ac_behavior( dec_ESP )
 void ac_behavior( dec_EBP )
 {
 	printManager.print ( "DEC BP", "DEC EBP" );
-	uint op1 = readRegister(EBP);
+	uint op1 = readRegister(GR, EBP);
 	uint op2 = 1;
 	uint res = op1 - op2;
-	writeRegister(EBP, res);
-	checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, EBP, res);
+	checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1869,11 +1877,11 @@ void ac_behavior( dec_EBP )
 void ac_behavior( dec_ESI )
 {
 	printManager.print ( "DEC SI", "DEC ESI" );
-	uint op1 = readRegister(ESI);
+	uint op1 = readRegister(GR, ESI);
 	uint op2 = 1;
 	uint res = op1 - op2;
-	writeRegister(ESI, res);
-	checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, ESI, res);
+	checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 // Debug ok
@@ -1881,11 +1889,11 @@ void ac_behavior( dec_ESI )
 void ac_behavior( dec_EDI )
 {
 	printManager.print ( "DEC DI", "DEC EDI" );
-	uint op1 = readRegister(EDI);
+	uint op1 = readRegister(GR, EDI);
 	uint op2 = 1;
 	uint res = op1 - op2;
-	writeRegister(EDI, res);
-	checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	writeRegister(GR, EDI, res);
+	checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 
@@ -1903,8 +1911,8 @@ void ac_behavior( iret_iretd )
 void ac_behavior( leave )
 {
 	printManager.print("LEAVE");
-	writeRegister(ESP, readRegister(EBP));
-	writeRegister(EBP, pop());
+	writeRegister(GR, ESP, readRegister(GR, EBP));
+	writeRegister(GR, EBP, pop(MEM, GR));
 }
 
 //!Instruction movs_m32_m32 behavior method.
@@ -1935,7 +1943,7 @@ void ac_behavior( cmps_m32_m32 ){
   uint op1 = MEM.read(add_src1);
   uint op2 = MEM.read(add_src2);
   uint temp = op1 - op2;
-  checkFlags(OPER_SUB, op1, op2, temp,FLAG_ALL);
+  checkFlags(SPR, OPER_SUB, op1, op2, temp,FLAG_ALL);
   
   if (df == 0) {
     GR.write(ESI,GR.read(ESI)+4);
@@ -1956,7 +1964,7 @@ void ac_behavior( scas_m32 ){
 	uint op1 = GR.read(EAX);
 	uint op2 = MEM.read(add_src);
 	uint temp = op1 - op2;
-	checkFlags(OPER_SUB, op1, op2, temp, FLAG_ALL);
+	checkFlags(SPR, OPER_SUB, op1, op2, temp, FLAG_ALL);
 	
 	if (df == 0) {
 		GR.write(EDI,GR.read(EDI)+4);
@@ -2009,10 +2017,10 @@ void ac_behavior( ud2 )
 void ac_behavior( cpuid )
 {
 	printManager.print ( "CPUID <Fake implementation>" );
-	writeRegister(EAX,0x00002005);
-	writeRegister(ECX,0x00002005);
-	writeRegister(EDX,0x00002005);
-	writeRegister(EBX,0x00002005);
+	writeRegister(GR, EAX,0x00002005);
+	writeRegister(GR, ECX,0x00002005);
+	writeRegister(GR, EDX,0x00002005);
+	writeRegister(GR, EBX,0x00002005);
 }
 
 // Debug ok
@@ -2020,9 +2028,9 @@ void ac_behavior( cpuid )
 void ac_behavior( bswap_EAX_r32 )
 {
 	printManager.print ( "BSWAP AX", "BSWAP EAX" );
-	uint op = readRegister(EAX);
+	uint op = readRegister(GR, EAX);
 	uint res = (op<<24)|((op<<8)&0xFF0000)|((op>>8)&0xFF00)|((op>>24)&0xFF);
-	writeRegister(EAX,res);
+	writeRegister(GR, EAX,res);
 }
 
 // Debug ok
@@ -2030,9 +2038,9 @@ void ac_behavior( bswap_EAX_r32 )
 void ac_behavior( bswap_ECX_r32 )
 {
 	printManager.print ( "BSWAP CX", "BSWAP ECX" );
-	uint op = readRegister(ECX);
+	uint op = readRegister(GR, ECX);
 	uint res = (op<<24)|((op<<8)&0xFF0000)|((op>>8)&0xFF00)|((op>>24)&0xFF);
-	writeRegister(ECX,res);
+	writeRegister(GR, ECX,res);
 }
 
 // Debug ok
@@ -2040,9 +2048,9 @@ void ac_behavior( bswap_ECX_r32 )
 void ac_behavior( bswap_EDX_r32 )
 {
 	printManager.print ( "BSWAP DX", "BSWAP EDX" );
-	uint op = readRegister(EDX);
+	uint op = readRegister(GR, EDX);
 	uint res = (op<<24)|((op<<8)&0xFF0000)|((op>>8)&0xFF00)|((op>>24)&0xFF);
-	writeRegister(EDX,res);
+	writeRegister(GR, EDX,res);
 }
 
 // Debug ok
@@ -2050,9 +2058,9 @@ void ac_behavior( bswap_EDX_r32 )
 void ac_behavior( bswap_EBX_r32 )
 {
 	printManager.print ( "BSWAP BX", "BSWAP EBX" );
-	uint op = readRegister(EBX);
+	uint op = readRegister(GR, EBX);
 	uint res = (op<<24)|((op<<8)&0xFF0000)|((op>>8)&0xFF00)|((op>>24)&0xFF);
-	writeRegister(EBX,res);
+	writeRegister(GR, EBX,res);
 }
 
 // Debug ok
@@ -2060,9 +2068,9 @@ void ac_behavior( bswap_EBX_r32 )
 void ac_behavior( bswap_ESP_r32 )
 {
 	printManager.print ( "BSWAP SP", "BSWAP ESP" );
-	uint op = readRegister(ESP);
+	uint op = readRegister(GR, ESP);
 	uint res = (op<<24)|((op<<8)&0xFF0000)|((op>>8)&0xFF00)|((op>>24)&0xFF);
-	writeRegister(ESP,res);
+	writeRegister(GR, ESP,res);
 }
 
 // Debug ok
@@ -2070,9 +2078,9 @@ void ac_behavior( bswap_ESP_r32 )
 void ac_behavior( bswap_EBP_r32 )
 {
 	printManager.print ( "BSWAP BP", "BSWAP EBP" );
-	uint op = readRegister(EBP);
+	uint op = readRegister(GR, EBP);
 	uint res = (op<<24)|((op<<8)&0xFF0000)|((op>>8)&0xFF00)|((op>>24)&0xFF);
-	writeRegister(EBP,res);
+	writeRegister(GR, EBP,res);
 }
 
 // Debug ok
@@ -2080,9 +2088,9 @@ void ac_behavior( bswap_EBP_r32 )
 void ac_behavior( bswap_ESI_r32 )
 {
 	printManager.print ( "BSWAP SI", "BSWAP ESI" );
-	uint op = readRegister(ESI);
+	uint op = readRegister(GR, ESI);
 	uint res = (op<<24)|((op<<8)&0xFF0000)|((op>>8)&0xFF00)|((op>>24)&0xFF);
-	writeRegister(ESI,res);
+	writeRegister(GR, ESI,res);
 }
 
 // Debug ok
@@ -2090,9 +2098,9 @@ void ac_behavior( bswap_ESI_r32 )
 void ac_behavior( bswap_EDI_r32 )
 {
 	printManager.print ( "BSWAP DI", "BSWAP EDI" );
-	uint op = readRegister(EDI);
+	uint op = readRegister(GR, EDI);
 	uint res = (op<<24)|((op<<8)&0xFF0000)|((op>>8)&0xFF00)|((op>>24)&0xFF);
-	writeRegister(EDI,res);
+	writeRegister(GR, EDI,res);
 }
 
 // Debug ok
@@ -2101,7 +2109,7 @@ void ac_behavior( push_FS )
 {
 	printManager.print ( "PUSH FS" );
 	OperandSize = OPERAND_SIZE16;
-	push(readSRegister(FS));
+	push(MEM, GR, readSRegister(SR, FS));
 }
 
 // Debug ok
@@ -2110,7 +2118,7 @@ void ac_behavior( push_GS )
 {
 	printManager.print ( "PUSH GS" );
 	OperandSize = OPERAND_SIZE16;
-	push(readSRegister(GS));
+	push(MEM, GR, readSRegister(SR, GS));
 }
 
 // Debug ok
@@ -2119,7 +2127,7 @@ void ac_behavior( pop_FS )
 {
 	printManager.print ( "POP FS" );
 	OperandSize = OPERAND_SIZE16;
-	writeSRegister(FS,pop());
+	writeSRegister(SR, FS,pop(MEM, GR));
 }
 
 // Debug ok
@@ -2128,41 +2136,41 @@ void ac_behavior( pop_GS )
 {
 	printManager.print ( "POP GS" );
 	OperandSize = OPERAND_SIZE16;
-	writeRegister(GS,pop());
+	writeRegister(GR, GS,pop(MEM, GR));
 }
 
 //!Instruction lds_r32_m16_32 behavior method.
 void ac_behavior( lds_r32_m16_32 )
 {
-	uint sel = readMemory16(data.address());
-	uint offset = readMemory(data.address()+2);
+	uint sel = readMemory16(MEM, data.address());
+	uint offset = readMemory(MEM, data.address()+2);
 	printManager.printReg1Addr("LDS R16, M16:16","LDS R32, M16:32","LDS","LDS",sel,offset);
-	writeSRegister(DS, sel);
-	writeRegister(data.reg1(), offset);
+	writeSRegister(SR, DS, sel);
+	writeRegister(GR, data.reg1(), offset);
 }
 
 //!Instruction les_r32_m16_32 behavior method.
 void ac_behavior( les_r32_m16_32 )
 {
-  uint sel = readMemory16(data.address());
-  uint offset = readMemory(data.address()+2);
+  uint sel = readMemory16(MEM, data.address());
+  uint offset = readMemory(MEM, data.address()+2);
   printManager.printReg1Addr("LES R16, M16:16","LES R32, M16:32","LES","LES",sel,offset);
-  writeSRegister(ES, sel);
-  writeRegister(data.reg1(), offset);
+  writeSRegister(SR, ES, sel);
+  writeRegister(GR, data.reg1(), offset);
 }
 
 //!Instruction lea_r32_m behavior method.
 void ac_behavior( lea_r32_m )
 {
   printManager.printReg1Addr ( "LEA R16, M", "LEA R32, M", "LEA", "LEA" );
-  dataManager.setReg1(data.address());
+  dataManager.setReg1(GR, data.address());
 }
 
 //!Instruction mov_rm32_r32 behavior method.
 void ac_behavior( mov_rm32_r32 )
 {
   printManager.printReg2MReg1("MOV RM16, R16","MOV RM32, R32","MOV","MOV");
-  dataManager.setMemOrReg2(dataManager.getReg1());
+  dataManager.setMemOrReg2(MEM, GR, dataManager.getReg1(GR));
 }
 
 
@@ -2170,75 +2178,75 @@ void ac_behavior( mov_rm32_r32 )
 void ac_behavior( mov_r32_rm32 )
 {
   printManager.printReg1MReg2("MOV R16, RM16","MOV R32, RM32","MOV","MOV");
-  dataManager.setReg1(dataManager.getMemOrReg2());
+  dataManager.setReg1(GR, dataManager.getMemOrReg2(MEM, GR));
 }
 
 //!Instruction mov_EAX_imm32 behavior method.
 void ac_behavior( mov_EAX_imm32 )
 {
-  uint i = dataManager.getImmediate();
+  uint i = dataManager.getImmediate(SPR, ac_pc);
   printf("Teste EAX: %i\n",i);
   printManager.printImm("MOV AX, IMM16","MOV EAX, IMM32","MOV AX,","MOV EAX,",i);
-  writeRegister(EAX, i);
+  writeRegister(GR, EAX, i);
 }
 
 //!Instruction mov_ECX_imm32 behavior method.
 void ac_behavior( mov_ECX_imm32 )
 {
-  uint i = dataManager.getImmediate();
+  uint i = dataManager.getImmediate(SPR, ac_pc);
   printf("Teste ECX: %i\n",i);
   printManager.printImm("MOV CX, IMM16","MOV ECX, IMM32","MOV CX,","MOV ECX,",i);
-  writeRegister(ECX, i);
+  writeRegister(GR, ECX, i);
 }
 
 //!Instruction mov_EDX_imm32 behavior method.
 void ac_behavior( mov_EDX_imm32 )
 {
-  uint i = dataManager.getImmediate();
+  uint i = dataManager.getImmediate(SPR, ac_pc);
   printf("Teste EDX: %i\n",i);
   printManager.printImm("MOV DX, IMM16","MOV EDX, IMM32","MOV DX,","MOV EDX,",i);
-  writeRegister(EDX, i);
+  writeRegister(GR, EDX, i);
 }
 
 //!Instruction mov_EBX_imm32 behavior method.
 void ac_behavior( mov_EBX_imm32 )
 {
-  uint i = dataManager.getImmediate();
+  uint i = dataManager.getImmediate(SPR, ac_pc);
   printf("Teste EBX: %i\n",i);
   printManager.printImm("MOV BX, IMM16","MOV EBX, IMM32","MOV BX,","MOV EBX,",i);
-  writeRegister(EBX, i);
+  writeRegister(GR, EBX, i);
 }
 
 //!Instruction mov_ESP_imm32 behavior method.
 void ac_behavior( mov_ESP_imm32 )
 {
-  uint i = dataManager.getImmediate();
+  uint i = dataManager.getImmediate(SPR, ac_pc);
   printManager.printImm("MOV SP, IMM16","MOV ESP, IMM32","MOV SP,","MOV ESP,",i);
-  writeRegister(ESP, i);
+  writeRegister(GR, ESP, i);
 }
 
 //!Instruction mov_EBP_imm32 behavior method.
 void ac_behavior( mov_EBP_imm32 )
 {
-  uint i = dataManager.getImmediate();
+  uint i = dataManager.getImmediate(SPR, ac_pc);
   printManager.printImm("MOV BP, IMM16","MOV EBP, IMM32","MOV BP,","MOV EBP,",i);
-  writeRegister(EBP, i);
+  writeRegister(GR, EBP, i);
 }
 
 //!Instruction mov_ESI_imm32 behavior method.
 void ac_behavior( mov_ESI_imm32 )
 {
-  uint i = dataManager.getImmediate();
+  uint i = dataManager.getImmediate(SPR, ac_pc);
   printManager.printImm("MOV SI, IMM16","MOV ESI, IMM32","MOV SI,","MOV ESI,",i);
-  writeRegister(ESI, i);
+  writeRegister(GR, ESI, i);
 }
 
 //!Instruction mov_EDI_imm32 behavior method.
 void ac_behavior( mov_EDI_imm32 )
 {
-  uint i = dataManager.getImmediate();
+  uint i = dataManager.getImmediate(SPR, ac_pc);
   printManager.printImm("MOV DI, IMM16","MOV EDI, IMM32","MOV DI,","MOV EDI,",i);
-  writeRegister(EDI, i);
+  writeRegister(GR, EDI, i);
 }
 
 //!Instruction mov_rm32_imm32 behavior method.
@@ -2246,9 +2254,9 @@ void ac_behavior( mov_rm32_imm32 )
 {
 
   printf("�aqui!!!!!\n");
-  uint i = dataManager.getImmediate();
+  uint i = dataManager.getImmediate(SPR, ac_pc);
   printManager.printReg2MImm("MOV RM16, IMM16","MOV RM32, IMM32","MOV","MOV",i);
-  dataManager.setMemOrReg2(i);
+  dataManager.setMemOrReg2(MEM, GR, i);
 }
 
 //!Instruction xchg_EAX_r32 behavior method.
@@ -2258,63 +2266,63 @@ void ac_behavior( mov_rm32_imm32 )
 void ac_behavior( xchg_EAX_ECX )
 {
   acprintf ( "XCHG EAX, ECX\n" );
-  uint aux = readRegister(EAX);
-  writeRegister(EAX, readRegister(ECX));
-  writeRegister(ECX, aux);
+  uint aux = readRegister(GR, EAX);
+  writeRegister(GR, EAX, readRegister(GR, ECX));
+  writeRegister(GR, ECX, aux);
 }
 
 //!Instruction xchg_EDX_r32 behavior method.
 void ac_behavior( xchg_EAX_EDX )
 {
   acprintf ( "XCHG EAX, EDX\n" );
-  uint aux = readRegister(EAX);
-  writeRegister(EAX, readRegister(EDX));
-  writeRegister(EDX, aux);
+  uint aux = readRegister(GR, EAX);
+  writeRegister(GR, EAX, readRegister(GR, EDX));
+  writeRegister(GR, EDX, aux);
 }
 
 //!Instruction xchg_EBX_r32 behavior method.
 void ac_behavior( xchg_EAX_EBX )
 {
 	acprintf ( "XCHG EAX, EBX\n" );
-        uint aux = readRegister(EAX);
-        writeRegister(EAX, readRegister(EBX));
-        writeRegister(EBX, aux);
+        uint aux = readRegister(GR, EAX);
+        writeRegister(GR, EAX, readRegister(GR, EBX));
+        writeRegister(GR, EBX, aux);
 }
 
 //!Instruction xchg_ESP_r32 behavior method.
 void ac_behavior( xchg_EAX_ESP )
 {
 	acprintf ( "XCHG EAX, ESP\n" );
-        uint aux = readRegister(EAX);
-        writeRegister(EAX, readRegister(ESP));
-        writeRegister(ESP, aux);
+        uint aux = readRegister(GR, EAX);
+        writeRegister(GR, EAX, readRegister(GR, ESP));
+        writeRegister(GR, ESP, aux);
 }
 
 //!Instruction xchg_EBP_r32 behavior method.
 void ac_behavior( xchg_EAX_EBP )
 {
 	acprintf ( "XCHG EAX, EBP\n" );
-        uint aux = readRegister(EAX);
-        writeRegister(EAX, readRegister(EBP));
-        writeRegister(EBP, aux);
+        uint aux = readRegister(GR, EAX);
+        writeRegister(GR, EAX, readRegister(GR, EBP));
+        writeRegister(GR, EBP, aux);
 }
 
 //!Instruction xchg_ESI_r32 behavior method.
 void ac_behavior( xchg_EAX_ESI )
 {
 	acprintf ( "XCHG EAX, ESI\n" );
-        uint aux = readRegister(EAX);
-        writeRegister(EAX, readRegister(ESI));
-        writeRegister(ESI, aux);
+        uint aux = readRegister(GR, EAX);
+        writeRegister(GR, EAX, readRegister(GR, ESI));
+        writeRegister(GR, ESI, aux);
 }
 
 //!Instruction xchg_EDI_r32 behavior method.
 void ac_behavior( xchg_EAX_EDI )
 {
 	acprintf ( "XCHG EAX, EDI\n" );
-        uint aux = readRegister(EAX);
-        writeRegister(EAX, readRegister(EDI));
-        writeRegister(EDI, aux);
+        uint aux = readRegister(GR, EAX);
+        writeRegister(GR, EAX, readRegister(GR, EDI));
+        writeRegister(GR, EDI, aux);
 }
 
 //!Instruction xchg_rm32_r32 behavior method.
@@ -2324,15 +2332,15 @@ void ac_behavior( xchg_rm32_r32 )
 	uint aux;
 	if ( data.usesMemory() )
 	{
-		aux = readRegister(data.reg1());
-		writeRegister(data.reg1(), readMemory(data.address()));
-		writeMemory(data.address(), aux);
+		aux = readRegister(GR, data.reg1());
+		writeRegister(GR, data.reg1(), readMemory(MEM, data.address()));
+		writeMemory(MEM, data.address(), aux);
 	}
 	else
 	{
-		aux = readRegister(data.reg1());
-		writeRegister(data.reg1(), readRegister(data.reg2()));
-		writeRegister(data.reg2(), aux);
+		aux = readRegister(GR, data.reg1());
+		writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
+		writeRegister(GR, data.reg2(), aux);
 	}
 }
 
@@ -2340,23 +2348,23 @@ void ac_behavior( xchg_rm32_r32 )
 void ac_behavior( push_rm32 )
 {
 	acprintf ( "PUSH RM32\n" );
-	if ( data.usesMemory() ) push(readMemory(data.address()));
-	else push(readRegister(data.reg2()));
+	if ( data.usesMemory() ) push(MEM, GR, readMemory(MEM, data.address()));
+	else push(MEM, GR, readRegister(GR, data.reg2()));
 }
 
 //!Instruction push_imm32 behavior method.
 void ac_behavior( push_imm32 )
 {
 	acprintf ( "PUSH IMM32\n" );
-	push(dataManager.getImmediate());
+	push(MEM, GR, dataManager.getImmediate(SPR, ac_pc));
 }
 
 //!Instruction pop_rm32 behavior method.
 void ac_behavior( pop_rm32 )
 {
 	acprintf ( "POP RM32\n" );
-	if ( data.usesMemory() ) writeMemory(data.address(),pop());
-	else writeRegister(data.reg2(),pop());
+	if ( data.usesMemory() ) writeMemory(MEM, data.address(),pop(MEM, GR));
+	else writeRegister(GR, data.reg2(),pop(MEM, GR));
 }
 
 //!Instruction in_EAX_imm8 behavior method.
@@ -2375,11 +2383,11 @@ void ac_behavior( out_imm8_EAX )
 void ac_behavior( add_EAX_imm32 )
 {
 	acprintf ( "ADD EAX, IMM32\n" );
-	uint op1 = readRegister(EAX);
-	uint op2 = dataManager.getImmediate();
+	uint op1 = readRegister(GR, EAX);
+	uint op2 = dataManager.getImmediate(SPR, ac_pc);
 	uint aux = op1 + op2;
-	writeRegister(EAX,aux);
-	checkFlags(OPER_ADD,op1,op2,aux,FLAG_ALL); 
+	writeRegister(GR, EAX,aux);
+	checkFlags(SPR, OPER_ADD,op1,op2,aux,FLAG_ALL); 
 }
 
 //!Instruction add_rm32_imm32 behavior method.
@@ -2389,47 +2397,47 @@ void ac_behavior( add_rm32_imm32 )
 	acprintf ( "ADD RM32, IMM32\n" );
 	if ( data.usesMemory() )
 	{
-		op1 = readMemory(data.address());
-		op2 = dataManager.getImmediate();
+		op1 = readMemory(MEM, data.address());
+		op2 = dataManager.getImmediate(SPR, ac_pc);
 		aux = op1 + op2;
-		writeMemory(data.address(),aux);
+		writeMemory(MEM, data.address(),aux);
 	}
 	else
 	{
-		op1 = readRegister(data.reg2());
-		op2 = dataManager.getImmediate();
+		op1 = readRegister(GR, data.reg2());
+		op2 = dataManager.getImmediate(SPR, ac_pc);
 		aux = op1 + op2;
-		writeRegister(data.reg2(), aux);
+		writeRegister(GR, data.reg2(), aux);
 	}
-	checkFlags(OPER_ADD,op1,op2,aux,FLAG_ALL);
+	checkFlags(SPR, OPER_ADD,op1,op2,aux,FLAG_ALL);
 }
 
 //!Instruction add_rm32_imm8 behavior method.
 void ac_behavior( add_rm32_imm8 )
 {
 	// acprintf ( "ADD RM32, IMM8\t\t" );
-	signed char i = data.immediate8();
+	signed char i = data.immediate8(SPR, ac_pc);
 	signed int ii = i;
 	uint op1, op2, aux;
 	if ( data.usesMemory() )
 	{
-		op1 = readMemory(data.address());
+		op1 = readMemory(MEM, data.address());
 		op2 = ii;
 		if ( op2 & (1<<7) ) op2 = op2|0xFFFFFF00;
 		aux = op1 + op2;
-		writeMemory(data.address(), aux);
+		writeMemory(MEM, data.address(), aux);
 	}
 	else
 	{
-		op1 = readRegister(data.reg2());
+		op1 = readRegister(GR, data.reg2());
 		op2 = ii;
 		if ( op2 & (1<<7) ) op2 = op2|0xFFFFFF00;
 		aux = op1 + op2;
-		writeRegister(data.reg2(),aux);
+		writeRegister(GR, data.reg2(),aux);
 	}
 	if ( data.usesMemory() ) acprintfmi ( "ADD", data.address(), op2 );
 	else acprintfri ( "ADD", data.reg2(), op2 );
-	checkFlags(OPER_ADD,op1,op2,aux,FLAG_ALL);
+	checkFlags(SPR, OPER_ADD,op1,op2,aux,FLAG_ALL);
 }
 
 //!Instruction add_rm32_r32 behavior method.
@@ -2441,23 +2449,23 @@ void ac_behavior( add_rm32_r32 )
 	if ( data.usesMemory() )
 	{
 		printf ( "[0x%08X], ", data.address() );
-		op1 = readMemory(data.address());
-		op2 = readRegister(data.reg1());
+		op1 = readMemory(MEM, data.address());
+		op2 = readRegister(GR, data.reg1());
 		aux = op1 + op2;
-		writeMemory(data.address(), aux);
+		writeMemory(MEM, data.address(), aux);
 	}
 	else
 	{
 		if ( OperandSize == OPERAND_SIZE16 ) printf ( "%s, ", reg_str16[data.reg1()] );
 		else printf ( "%s, ", reg_str[data.reg1()] );
-		op1 = readRegister(data.reg1());
-		op2 = readRegister(data.reg2());
+		op1 = readRegister(GR, data.reg1());
+		op2 = readRegister(GR, data.reg2());
 		aux = op1 + op2;
-		writeRegister(data.reg2(), aux);
+		writeRegister(GR, data.reg2(), aux);
 	}
 	if ( OperandSize == OPERAND_SIZE16 ) printf ( "%s\n", reg_str16[data.reg2()] );
 	else printf ( "%s\n", reg_str[data.reg2()] );
-	checkFlags(OPER_ADD,op1,op2,aux,FLAG_ALL);
+	checkFlags(SPR, OPER_ADD,op1,op2,aux,FLAG_ALL);
 }
 
 //!Instruction add_r32_rm32 behavior method.
@@ -2467,19 +2475,19 @@ void ac_behavior( add_r32_rm32 )
 	acprintf ( "ADD R32, RM32\n" );
 	if ( data.usesMemory() )
 	{
-		op1 = readRegister(data.reg1());
-		op2 = readMemory(data.address());
+		op1 = readRegister(GR, data.reg1());
+		op2 = readMemory(MEM, data.address());
 		aux = op1 + op2;
-		writeRegister(data.reg1(),aux);
+		writeRegister(GR, data.reg1(),aux);
 	}
 	else
 	{
-		op1 = readRegister(data.reg1());
-		op2 = readRegister(data.reg2());
+		op1 = readRegister(GR, data.reg1());
+		op2 = readRegister(GR, data.reg2());
 		aux = op1 + op2;
-		writeRegister(data.reg1(),aux);
+		writeRegister(GR, data.reg1(),aux);
 	}
-	checkFlags(OPER_ADD,op1,op2,aux,FLAG_ALL);
+	checkFlags(SPR, OPER_ADD,op1,op2,aux,FLAG_ALL);
 }
 
 //!Instruction adc_EAX_imm32 behavior method.
@@ -2487,12 +2495,12 @@ void ac_behavior( adc_EAX_imm32 )
 {
 	acprintf ( "ADC EAX, IMM32\n" );
 	uint op1, op2, aux, carry=0;
-	if ( testFlag ( FLAG_CF ) ) carry = 1;
-	op1 = readRegister(EAX);
-	op2 = dataManager.getImmediate() + carry;
+	if ( testFlag (SPR, FLAG_CF ) ) carry = 1;
+	op1 = readRegister(GR, EAX);
+	op2 = dataManager.getImmediate(SPR, ac_pc) + carry;
 	aux = op1 + op2;
-	writeRegister(EAX, aux);
-	checkFlags(OPER_ADD,op1,op2,aux,FLAG_ALL);
+	writeRegister(GR, EAX, aux);
+	checkFlags(SPR, OPER_ADD,op1,op2,aux,FLAG_ALL);
 }
 
 //!Instruction adc_rm32_r32 behavior method.
@@ -2500,11 +2508,11 @@ void ac_behavior( adc_rm32_r32 )
 {
 	acprintf ( "ADC RM32, R32\n" );
 	uint op1, op2, res;
-	op1 = dataManager.getMemOrReg2();
-	op2 = dataManager.getReg1() + testFlag(FLAG_CF);
+	op1 = dataManager.getMemOrReg2(MEM, GR);
+	op2 = dataManager.getReg1(GR) + testFlag(SPR, FLAG_CF);
 	res = op1 + op2;
-	dataManager.setMemOrReg2(res);
-	checkFlags(OPER_ADD,op1,op2,res,FLAG_ALL);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	checkFlags(SPR, OPER_ADD,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction adc_r32_rm32 behavior method.
@@ -2514,19 +2522,19 @@ void ac_behavior( adc_r32_rm32 )
         uint op1, op2, res;
         if ( data.usesMemory() )
         {
-                op1 = readMemory(data.address());
-                op2 = readRegister(data.reg1())+testFlag(FLAG_CF);
+                op1 = readMemory(MEM, data.address());
+                op2 = readRegister(GR, data.reg1())+testFlag(SPR, FLAG_CF);
                 res = op1 + op2;
-		writeRegister(data.reg1(),res);
+		writeRegister(GR, data.reg1(),res);
         }
         else
         {
-                op1 = readRegister(data.reg1());
-                op2 = readRegister(data.reg2())+testFlag(FLAG_CF);
+                op1 = readRegister(GR, data.reg1());
+                op2 = readRegister(GR, data.reg2())+testFlag(SPR, FLAG_CF);
                 res = op1 + op2;
                 GR.write(data.reg1(),res);
         }
-        checkFlags(OPER_ADD,op1,op2,res,FLAG_ALL);
+        checkFlags(SPR, OPER_ADD,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction sub_EAX_imm32 behavior method.
@@ -2534,11 +2542,11 @@ void ac_behavior( sub_EAX_imm32 )
 {
 	acprintf ( "SUB EAX, IMM32\n" );
 	uint op1, op2, res;
-	op1 = readRegister(EAX);
-	op2 = dataManager.getImmediate();
+	op1 = readRegister(GR, EAX);
+	op2 = dataManager.getImmediate(SPR, ac_pc);
 	res = op1 - op2;
-	writeRegister(EAX, res);
-	checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL);
+	writeRegister(GR, EAX, res);
+	checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction sub_rm32_r32 behavior method.
@@ -2553,13 +2561,13 @@ void ac_behavior( sub_rm32_r32 )
 	  if ( OperandSize == OPERAND_SIZE16 ) printf ( "%s, ", reg_str16[data.reg2()] );
 	  else printf ( "%s, ", reg_str[data.reg2()] );
 	}
-	op1 = dataManager.getMemOrReg2();
-	op2 = dataManager.getReg1();
+	op1 = dataManager.getMemOrReg2(MEM, GR);
+	op2 = dataManager.getReg1(GR);
 	if ( OperandSize == OPERAND_SIZE16 ) printf ( "%s\n", reg_str16[data.reg1()] );
 	else printf ( "%s\n", reg_str[data.reg1()] );
 	res = op1 - op2;
-	dataManager.setMemOrReg2(res);
-	checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction sub_r32_rm32 behavior method.
@@ -2567,11 +2575,11 @@ void ac_behavior( sub_r32_rm32 )
 {
         acprintf ( "SUB R32, RM32\n" );
         uint op1, op2, res;
-	op1 = dataManager.getReg1();
-	op2 = dataManager.getMemOrReg2();
+	op1 = dataManager.getReg1(GR);
+	op2 = dataManager.getMemOrReg2(MEM, GR);
 	res = op1 - op2;
-	dataManager.setReg1(res);
-        checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL);
+	dataManager.setReg1(GR, res);
+        checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction sbb_EAX_imm32 behavior method.
@@ -2579,12 +2587,12 @@ void ac_behavior( sbb_EAX_imm32 )
 {
 	acprintf ( "SBB EAX, IMM32\n" );
 	uint op1, op2, res, carry=0;
-	if ( testFlag ( FLAG_CF ) ) carry=1;
-	op1 = readRegister(EAX);
-	op2 = dataManager.getImmediate() + carry;
+	if ( testFlag (SPR, FLAG_CF ) ) carry=1;
+	op1 = readRegister(GR, EAX);
+	op2 = dataManager.getImmediate(SPR, ac_pc) + carry;
 	res = op1 - op2;
-	writeRegister(EAX,res);
-	checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL);
+	writeRegister(GR, EAX,res);
+	checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction sbb_rm32_r32 behavior method.
@@ -2592,12 +2600,12 @@ void ac_behavior( sbb_rm32_r32 )
 {
 	acprintf ( "SBB RM32, R32\n" );
 	uint op1, op2, res, carry=0;
-	if ( testFlag ( FLAG_CF ) ) carry = 1;
-	op1 = dataManager.getMemOrReg2();
-	op2 = dataManager.getReg1() + carry;
+	if ( testFlag (SPR, FLAG_CF ) ) carry = 1;
+	op1 = dataManager.getMemOrReg2(MEM, GR);
+	op2 = dataManager.getReg1(GR) + carry;
 	res = op1 - op2;
-	dataManager.setMemOrReg2(res);
-	checkFlags ( OPER_SUB,op1,op2,res,FLAG_ALL );
+	dataManager.setMemOrReg2(MEM, GR, res);
+	checkFlags (SPR, OPER_SUB,op1,op2,res,FLAG_ALL );
 }
 
 //!Instruction sbb_r32_rm32 behavior method.
@@ -2605,43 +2613,43 @@ void ac_behavior( sbb_r32_rm32 )
 {
         acprintf ( "SBB R32, RM32\n" );
         uint op1, op2, res, carry=0;
-        if ( testFlag ( FLAG_CF ) ) carry = 1;
-	op1 = dataManager.getReg1();
-	op2 = dataManager.getMemOrReg2() + carry;
+        if ( testFlag (SPR, FLAG_CF ) ) carry = 1;
+	op1 = dataManager.getReg1(GR);
+	op2 = dataManager.getMemOrReg2(MEM, GR) + carry;
 	res = op1 - op2;
-	dataManager.setReg1(res);
-        checkFlags ( OPER_SUB,op1,op2,res,FLAG_ALL );
+	dataManager.setReg1(GR, res);
+        checkFlags (SPR, OPER_SUB,op1,op2,res,FLAG_ALL );
 }
 
 //!Instruction mul_rm32 behavior method.
 void ac_behavior( mul_rm32 )
 {
 	acprintf ( "MUL RM32\n" );
-	uint op1 = readRegister(EAX);
-	uint op2 = dataManager.getMemOrReg2();
+	uint op1 = readRegister(GR, EAX);
+	uint op2 = dataManager.getMemOrReg2(MEM, GR);
 	unsigned long long lop1 = op1;
 	unsigned long long lop2 = op2;
 	unsigned long long res = lop1 * lop2;
 	if (	((OperandSize==OPERAND_SIZE32)&&(res>0xFFFFFFFF))||
 		((OperandSize==OPERAND_SIZE16)&&(res>0xFFFF)) )
 	{
-		setFlag(FLAG_OF);
-		setFlag(FLAG_CF);
+		setFlag(SPR, FLAG_OF);
+		setFlag(SPR, FLAG_CF);
 	}
 	else
 	{
-		resetFlag(FLAG_OF);
-		resetFlag(FLAG_CF);
+		resetFlag(SPR, FLAG_OF);
+		resetFlag(SPR, FLAG_CF);
 	}
 	uint mask = 0xFFFFFFFF;
-	uint disp = 32;
+	uint disp_ = 32;
 	if ( OperandSize == OPERAND_SIZE16 )
 	{
 		mask = 0xFFFF;
-		disp = 16;
+		disp_ = 16;
 	}
-	writeRegister(EDX, res >> disp );
-	writeRegister(EAX, res & mask );
+	writeRegister(GR, EDX, res >> disp_ );
+	writeRegister(GR, EAX, res & mask );
 }
 
 //!Instruction imul_r32_rm32_imm8 behavior method.
@@ -2654,27 +2662,27 @@ void ac_behavior( imul_r32_rm32_imm8 )
 	mask = mask<<32;
 	if ( data.usesMemory() )
 	{
-		op1 = data.immediate8();
+		op1 = data.immediate8(SPR, ac_pc);
 		op2 = MEM.read(data.address());
 		aux = op1*op2;
 		GR.write(data.reg1(),aux);
 	}
 	else
 	{
-		op1 = data.immediate8();
+		op1 = data.immediate8(SPR, ac_pc);
 		op2 = GR.read(data.reg1());
 		aux = op1*op2;
 		GR.write(data.reg2(),aux);
 	}
 	if ( aux & mask )
 	{
-		setFlag(FLAG_OF);
-		setFlag(FLAG_CF);
+		setFlag(SPR, FLAG_OF);
+		setFlag(SPR, FLAG_CF);
 	}
 	else
 	{
-		resetFlag(FLAG_OF);
-		resetFlag(FLAG_CF);
+		resetFlag(SPR, FLAG_OF);
+		resetFlag(SPR, FLAG_CF);
 	}
 }
 
@@ -2688,27 +2696,27 @@ void ac_behavior( imul_r32_rm32_imm32 )
 	mask = mask<<32;
 	if ( data.usesMemory() )
 	{
-		op1 = data.immediate();
+		op1 = data.immediate(SPR, ac_pc);
 		op2 = MEM.read(data.address());
 		aux = op1*op2;
 		GR.write(data.reg1(),aux);
 	}
 	else
 	{
-		op1 = data.immediate();
+		op1 = data.immediate(SPR, ac_pc);
 		op2 = GR.read(data.reg1());
 		aux = op1*op2;
 		GR.write(data.reg2(),aux);
 	}
 	if ( aux & mask )
 	{
-		setFlag(FLAG_OF);
-		setFlag(FLAG_CF);
+		setFlag(SPR, FLAG_OF);
+		setFlag(SPR, FLAG_CF);
 	}
 	else
 	{
-		resetFlag(FLAG_OF);
-		resetFlag(FLAG_CF);
+		resetFlag(SPR, FLAG_OF);
+		resetFlag(SPR, FLAG_CF);
 	}
 }
 
@@ -2717,10 +2725,10 @@ void ac_behavior( cmp_EAX_imm32 )
 {
 	acprintf ( "CMP EAX, IMM32\n" );
 	uint op1, op2, aux;
-	op1 = readRegister(EAX);
-	op2 = dataManager.getImmediate();
+	op1 = readRegister(GR, EAX);
+	op2 = dataManager.getImmediate(SPR, ac_pc);
 	aux = op1 + (~op2) + 0x01;
-	checkFlags(OPER_SUB,op1,op2,aux,FLAG_ALL);
+	checkFlags(SPR, OPER_SUB,op1,op2,aux,FLAG_ALL);
 }
 
 //!Instruction cmp_rm32_r32 behavior method.
@@ -2730,16 +2738,16 @@ void ac_behavior( cmp_rm32_r32 )
 	uint op1, op2, aux;
 	if ( data.usesMemory() )
 	{
-		op1 = readMemory(data.address());
-		op2 = readRegister(data.reg1());
+		op1 = readMemory(MEM, data.address());
+		op2 = readRegister(GR, data.reg1());
 	}
 	else
 	{
-		op2 = readRegister(data.reg1());
-		op1 = readRegister(data.reg2());
+		op2 = readRegister(GR, data.reg1());
+		op1 = readRegister(GR, data.reg2());
 	}
 	aux = op1 + (~op2) + 0x01;
-	checkFlags(OPER_SUB,op1,op2,aux,FLAG_ALL);
+	checkFlags(SPR, OPER_SUB,op1,op2,aux,FLAG_ALL);
 }
 
 //!Instruction cmp_r32_rm32 behavior method.
@@ -2747,10 +2755,10 @@ void ac_behavior( cmp_r32_rm32 )
 {
 	acprintf ( "CMP R32, RM32\n" );
 	uint op1, op2, res;
-	op1 = dataManager.getReg1();
-	op2 = dataManager.getMemOrReg2();
+	op1 = dataManager.getReg1(GR);
+	op2 = dataManager.getMemOrReg2(MEM, GR);
 	res = op1 - op2;
-	checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL);
+	checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction and_EAX_imm32 behavior method.
@@ -2758,13 +2766,13 @@ void ac_behavior( and_EAX_imm32 )
 {
 	acprintf ( "AND EAX, IMM32\n" );
 	uint op1, op2, res;
-	op1 = readRegister(EAX);
-	op2 = dataManager.getImmediate();
+	op1 = readRegister(GR, EAX);
+	op2 = dataManager.getImmediate(SPR, ac_pc);
 	res = op1 & op2;
-	writeRegister(EAX, res);
-	resetFlag ( FLAG_OF );
-	resetFlag ( FLAG_CF );
-	checkFlags( OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF );
+	writeRegister(GR, EAX, res);
+	resetFlag ( SPR, FLAG_OF );
+	resetFlag ( SPR, FLAG_CF );
+	checkFlags(SPR,  OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF );
 }
 
 //!Instruction and_rm32_r32 behavior method.
@@ -2772,12 +2780,12 @@ void ac_behavior( and_rm32_r32 )
 {
 	acprintf ( "AND RM32, R32\n" );
 	uint op1, op2, res;
-	op1 = dataManager.getMemOrReg2();
-	op2 = dataManager.getReg1();
+	op1 = dataManager.getMemOrReg2(MEM, GR);
+	op2 = dataManager.getReg1(GR);
 	res = op1 & op2;
-	dataManager.setMemOrReg2(res);
-	checkFlags(OPER_NONE,op1,op2,res,FLAG_ALL);
-	resetFlag(FLAG_CF); resetFlag(FLAG_OF);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	checkFlags(SPR, OPER_NONE,op1,op2,res,FLAG_ALL);
+	resetFlag(SPR, FLAG_CF); resetFlag(SPR, FLAG_OF);
 }
 
 //!Instruction and_r32_rm32 behavior method.
@@ -2785,12 +2793,12 @@ void ac_behavior( and_r32_rm32 )
 {
         acprintf ( "AND R32, RM32\n" );
         uint op1, op2, res;
-	op1 = dataManager.getMemOrReg2();
-	op2 = dataManager.getReg1();
+	op1 = dataManager.getMemOrReg2(MEM, GR);
+	op2 = dataManager.getReg1(GR);
 	res = op1 & op2;
-	dataManager.setReg1(res);
-	checkFlags(OPER_NONE,op1,op2,res,FLAG_ALL);
-	resetFlag(FLAG_CF); resetFlag(FLAG_OF);
+	dataManager.setReg1(GR, res);
+	checkFlags(SPR, OPER_NONE,op1,op2,res,FLAG_ALL);
+	resetFlag(SPR, FLAG_CF); resetFlag(SPR, FLAG_OF);
 }
 
 //!Instruction or_EAX_imm32 behavior method.
@@ -2798,13 +2806,13 @@ void ac_behavior( or_EAX_imm32 )
 {
         acprintf ( "OR EAX, IMM32\n" );
         uint op1, op2, res;
-        op1 = readRegister(EAX);
-        op2 = dataManager.getImmediate();
+        op1 = readRegister(GR, EAX);
+        op2 = dataManager.getImmediate(SPR, ac_pc);
         res = op1 | op2;
-	writeRegister(EAX, res);
-        resetFlag ( FLAG_OF );
-        resetFlag ( FLAG_CF );
-        checkFlags( OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF );
+	writeRegister(GR, EAX, res);
+        resetFlag ( SPR, FLAG_OF );
+        resetFlag ( SPR, FLAG_CF );
+        checkFlags(SPR,  OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF );
 }
 
 //!Instruction or_rm32_r32 behavior method.
@@ -2812,12 +2820,12 @@ void ac_behavior( or_rm32_r32 )
 {
         acprintf ( "OR RM32, R32\n" );
         uint op1, op2, res;
-	op1 = dataManager.getMemOrReg2();
-	op2 = dataManager.getReg1();
+	op1 = dataManager.getMemOrReg2(MEM, GR);
+	op2 = dataManager.getReg1(GR);
 	res = op1 | op2;
-	dataManager.setMemOrReg2(res);
-	checkFlags(OPER_NONE,op1,op2,res,FLAG_ALL);
-	resetFlag(FLAG_OF);resetFlag(FLAG_CF);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	checkFlags(SPR, OPER_NONE,op1,op2,res,FLAG_ALL);
+	resetFlag(SPR, FLAG_OF);resetFlag(SPR, FLAG_CF);
 }
 
 //!Instruction or_r32_rm32 behavior method.
@@ -2825,12 +2833,12 @@ void ac_behavior( or_r32_rm32 )
 {
         acprintf ( "OR R32, RM32\n" );
         uint op1, op2, res;
-	op1 = dataManager.getMemOrReg2();
-	op2 = dataManager.getReg1();
+	op1 = dataManager.getMemOrReg2(MEM, GR);
+	op2 = dataManager.getReg1(GR);
 	res = op1|op2;
-	dataManager.setReg1(res);
-	checkFlags(OPER_NONE,op1,op2,res,FLAG_ALL);
-	resetFlag(FLAG_OF); resetFlag(FLAG_CF);
+	dataManager.setReg1(GR, res);
+	checkFlags(SPR, OPER_NONE,op1,op2,res,FLAG_ALL);
+	resetFlag(SPR, FLAG_OF); resetFlag(SPR, FLAG_CF);
 }
 
 //!Instruction xor_EAX_imm32 behavior method.
@@ -2838,13 +2846,13 @@ void ac_behavior( xor_EAX_imm32 )
 {
         acprintf ( "XOR EAX, IMM32\n" );
         uint op1, op2, res;
-        op1 = readRegister(EAX);
-        op2 = dataManager.getImmediate();
+        op1 = readRegister(GR, EAX);
+        op2 = dataManager.getImmediate(SPR, ac_pc);
         res = op1 ^ op2;
-	writeRegister(EAX, res);
-        resetFlag ( FLAG_OF );
-        resetFlag ( FLAG_CF );
-        checkFlags( OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF );
+	writeRegister(GR, EAX, res);
+        resetFlag ( SPR, FLAG_OF );
+        resetFlag ( SPR, FLAG_CF );
+        checkFlags(SPR,  OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF );
 }
 
 //!Instruction xor_rm32_r32 behavior method.
@@ -2852,12 +2860,12 @@ void ac_behavior( xor_rm32_r32 )
 {
         acprintf ( "XOR RM32, R32\n" );
         uint op1, op2, res;
-	op1 = dataManager.getMemOrReg2();
-	op2 = dataManager.getReg1();
+	op1 = dataManager.getMemOrReg2(MEM, GR);
+	op2 = dataManager.getReg1(GR);
 	res = op1 ^ op2;
-	dataManager.setMemOrReg2(res);
-	checkFlags(OPER_NONE,op1,op2,res,FLAG_ALL);
-	resetFlag(FLAG_OF); resetFlag(FLAG_CF);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	checkFlags(SPR, OPER_NONE,op1,op2,res,FLAG_ALL);
+	resetFlag(SPR, FLAG_OF); resetFlag(SPR, FLAG_CF);
 }
 
 //!Instruction xor_r32_rm32 behavior method.
@@ -2865,38 +2873,71 @@ void ac_behavior( xor_r32_rm32 )
 {
         acprintf ( "XOR R32, RM32\n" );
         uint op1, op2, res;
-	op1 = dataManager.getMemOrReg2();
-	op2 = dataManager.getReg1();
+	op1 = dataManager.getMemOrReg2(MEM, GR);
+	op2 = dataManager.getReg1(GR);
 	res = op1^op2;
-	dataManager.setReg1(res);
-	checkFlags(OPER_NONE,op1,op2,res,FLAG_ALL);
-	resetFlag(FLAG_OF); resetFlag(FLAG_CF);
+	dataManager.setReg1(GR, res);
+	checkFlags(SPR, OPER_NONE,op1,op2,res,FLAG_ALL);
+	resetFlag(SPR, FLAG_OF); resetFlag(SPR, FLAG_CF);
 }
 
-//!Instruction sal_shl_rm32 behavior method.
-void ac_behavior( sal_shl_rm32 )
+//!Instruction sal_shl_1_rm32 behavior method.
+void ac_behavior( sal_shl_1_rm32 )
 {
 	// acprintf ( "SAL RM32\n" );
 	printf ( "SAL " );
-	unsigned int op = dataManager.getMemOrReg2();
+	unsigned int op = dataManager.getMemOrReg2(MEM, GR);
 	unsigned int res = op << 1;
-	dataManager.setMemOrReg2(res);
+	dataManager.setMemOrReg2(MEM, GR, res);
 	if ( data.usesMemory() ) printf ( "[0x%08X]\n", data.address() );
 	else
 	{
 		if ( OperandSize == OPERAND_SIZE16 ) printf ( "%s\n", reg_str16[data.reg2()] );
 		else printf ( "%s\n", reg_str[data.reg2()] );
 	}
-	if ( OperandSize == OPERAND_SIZE16 ) writeFlag(FLAG_CF, MSB16(op));
-	else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(FLAG_CF, MSB32(op));
-	bool of16 = (testFlag(FLAG_CF)&&!MSB16(res))||(!testFlag(FLAG_CF)&&MSB16(res));
-	bool of32 = (testFlag(FLAG_CF)&&!MSB32(res))||(!testFlag(FLAG_CF)&&MSB32(res));
-	if ( OperandSize == OPERAND_SIZE16 ) writeFlag(FLAG_OF, of16);
-	else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(FLAG_OF, of32);
+	if ( OperandSize == OPERAND_SIZE16 ) writeFlag(SPR, FLAG_CF, MSB16(op));
+	else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(SPR, FLAG_CF, MSB32(op));
+	bool of16 = (testFlag(SPR, FLAG_CF)&&!MSB16(res))||(!testFlag(SPR, FLAG_CF)&&MSB16(res));
+	bool of32 = (testFlag(SPR, FLAG_CF)&&!MSB32(res))||(!testFlag(SPR, FLAG_CF)&&MSB32(res));
+	if ( OperandSize == OPERAND_SIZE16 ) writeFlag(SPR, FLAG_OF, of16);
+	else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(SPR, FLAG_OF, of32);
 }
 
-//!Instruction sar_rm32 behavior method
-void ac_behavior( sar_rm32 )
+
+//!Instruction sal_shl_cl_rm32 behavior method.
+void ac_behavior( sal_shl_cl_rm32 )
+{
+        //acprintf ( "SAL CL RM32\n" );
+        printf ( "SAL CL " );
+        unsigned int op = dataManager.getMemOrReg2(MEM, GR);
+        unsigned char cl = readRegister8(GR, CL);
+        unsigned int res = op << cl;//shift CL
+        dataManager.setMemOrReg2(MEM, GR, res);
+        if ( data.usesMemory() ) printf ( "[0x%08X]\n", data.address() );
+        else
+        {
+                if ( OperandSize == OPERAND_SIZE16 ) printf ( "%s\n", reg_str16[data.reg2()] );
+                else printf ( "%s\n", reg_str[data.reg2()] );
+        }
+        
+        //set CF Flag
+        if (cl>0) {
+          unsigned int flag = (op << (cl-1));
+          if ( OperandSize == OPERAND_SIZE16 ) writeFlag(SPR, FLAG_CF, MSB16(flag));
+          else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(SPR, FLAG_CF, MSB32(flag));
+        }
+        
+        if (cl==1) {
+                bool of16 = (testFlag(SPR, FLAG_CF)&&!MSB16(res))||(!testFlag(SPR, FLAG_CF)&&MSB16(res));
+                bool of32 = (testFlag(SPR, FLAG_CF)&&!MSB32(res))||(!testFlag(SPR, FLAG_CF)&&MSB32(res));
+                if ( OperandSize == OPERAND_SIZE16 ) writeFlag(SPR, FLAG_OF, of16);
+                else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(SPR, FLAG_OF, of32);
+        }
+        checkFlags(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+}
+
+//!Instruction sar_1_rm32 behavior method
+void ac_behavior( sar_1_rm32 )
 {
 	//acprintf ( "SAR RM32\n" );
 	printf ( "SAR " );
@@ -2906,26 +2947,64 @@ void ac_behavior( sar_rm32 )
 		if ( OperandSize == OPERAND_SIZE16 ) printf ( "%s\n", reg_str16[data.reg2()] );
 		else printf ( "%s\n", reg_str[data.reg2()] );
 	}
-	signed int op = dataManager.getMemOrReg2();
+	signed int op = dataManager.getMemOrReg2(MEM, GR);
 	signed int res = op >> 1;
-	dataManager.setMemOrReg2(res);
-	checkFlags(OPER_NONE,0,0,res,FLAG_ALL);
-	resetFlag(FLAG_OF);
-	writeFlag(FLAG_CF, op&0x01);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	checkFlags(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+	resetFlag(SPR, FLAG_OF);
+	writeFlag(SPR, FLAG_CF, op&0x01);
 }
 
-//!Instruction shr_rm32 behavior method
-void ac_behavior( shr_rm32 )
+
+//!Instruction sar_cl_rm32 behavior method
+void ac_behavior( sar_cl_rm32 )
+{
+        acprintf ( "SAR CL RM32\n" );
+        printf ( "SAR CL " );
+        if ( data.usesMemory() ) printf ( "[0x%08X]\n", data.address() );
+        else
+        {
+                if ( OperandSize == OPERAND_SIZE16 ) printf ( "%s\n", reg_str16[data.reg2()] );
+                else printf ( "%s\n", reg_str[data.reg2()] );
+        }
+        signed int op = dataManager.getMemOrReg2(MEM, GR);
+        unsigned char cl = readRegister8(GR, CL);
+        signed int res = op >> cl; //amount = CL
+        dataManager.setMemOrReg2(MEM, GR, res);
+        checkFlags(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+        if (cl==1) resetFlag(SPR, FLAG_OF);
+        if (cl>0) writeFlag(SPR, FLAG_CF, (op>>(cl-1))&0x01);
+}
+
+//!Instruction shr_1_rm32 behavior method
+void ac_behavior( shr_1_rm32 )
 {
 	acprintf ( "SHR RM32\n" );
-	uint op = dataManager.getMemOrReg2();
+	uint op = dataManager.getMemOrReg2(MEM, GR);
 	if ( OperandSize == OPERAND_SIZE16 ) op = op&MASK_16BITS;
 	uint res = op >> 1;
-	dataManager.setMemOrReg2(res);
-	checkFlags(OPER_NONE,0,0,res,FLAG_ALL);
-	writeFlag(FLAG_CF, op&0x01);
-	if ( OperandSize == OPERAND_SIZE16 ) writeFlag(FLAG_OF,MSB16(op));
-	else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(FLAG_OF,MSB32(op));
+	dataManager.setMemOrReg2(MEM, GR, res);
+	checkFlags(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+	writeFlag(SPR, FLAG_CF, op&0x01);
+	if ( OperandSize == OPERAND_SIZE16 ) writeFlag(SPR, FLAG_OF,MSB16(op));
+	else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(SPR, FLAG_OF,MSB32(op));
+}
+
+//!Instruction shr_cl_rm32 behavior method
+void ac_behavior( shr_cl_rm32 )
+{
+        acprintf ( "SHR CL RM32\n" );
+        uint op = dataManager.getMemOrReg2(MEM, GR);
+        if ( OperandSize == OPERAND_SIZE16 ) op = op&MASK_16BITS;
+        unsigned char cl = readRegister8(GR, CL);
+        uint res = op >> cl;
+        dataManager.setMemOrReg2(MEM, GR, res);
+        checkFlags(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+        if (cl>0) writeFlag(SPR, FLAG_CF, (op>>(cl-1))&0x01);
+        if (cl==1) {
+                if ( OperandSize == OPERAND_SIZE16 ) writeFlag(SPR, FLAG_OF,MSB16(op));
+                else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(SPR, FLAG_OF,MSB32(op));
+        }
 }
 
 //!Instruction sal_shl_rm32_imm8 behavior method
@@ -2939,18 +3018,18 @@ void ac_behavior( sal_shl_rm32_imm8 )
 		if ( OperandSize == OPERAND_SIZE16 ) printf ( "%s, ", reg_str16[data.reg2()] );
 		else printf ( "%s, ", reg_str[data.reg2()] );
 	}
-	unsigned int op = dataManager.getMemOrReg2();
-	signed char count = data.immediate8();
+	unsigned int op = dataManager.getMemOrReg2(MEM, GR);
+	signed char count = data.immediate8(SPR, ac_pc);
 	unsigned int res = op << count;
 	printf ( "0x%02X\n", count );
-	dataManager.setMemOrReg2(res);
-	checkFlags(OPER_NONE,0,0,res,FLAG_ALL);
-	if ( OperandSize == OPERAND_SIZE16 ) writeFlag(FLAG_CF,MSB16(op));
-	else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(FLAG_CF,MSB32(op));
-	bool of16 = (!testFlag(FLAG_CF)&&MSB16(res))||(testFlag(FLAG_CF)&&!MSB16(res));
-	bool of32 = (!testFlag(FLAG_CF)&&MSB32(res))||(testFlag(FLAG_CF)&&!MSB32(res));
-	if ( OperandSize == OPERAND_SIZE16 ) writeFlag(FLAG_OF, of16);
-	else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(FLAG_OF, of32 );
+	dataManager.setMemOrReg2(MEM, GR, res);
+	checkFlags(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+	if ( OperandSize == OPERAND_SIZE16 ) writeFlag(SPR, FLAG_CF,MSB16(op));
+	else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(SPR, FLAG_CF,MSB32(op));
+	bool of16 = (!testFlag(SPR, FLAG_CF)&&MSB16(res))||(testFlag(SPR, FLAG_CF)&&!MSB16(res));
+	bool of32 = (!testFlag(SPR, FLAG_CF)&&MSB32(res))||(testFlag(SPR, FLAG_CF)&&!MSB32(res));
+	if ( OperandSize == OPERAND_SIZE16 ) writeFlag(SPR, FLAG_OF, of16);
+	else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(SPR, FLAG_OF, of32 );
 }
 
 //!Instruction sar_rm32_imm8 behavior method
@@ -2964,13 +3043,13 @@ void ac_behavior( sar_rm32_imm8 )
 		if ( OperandSize == OPERAND_SIZE16 ) printf ( "%s, ", reg_str16[data.reg2()] );
 		else printf ( "%s, ", reg_str[data.reg2()] );
 	}
-	signed int op = dataManager.getMemOrReg2();
-	signed char count = data.immediate8();
+	signed int op = dataManager.getMemOrReg2(MEM, GR);
+	signed char count = data.immediate8(SPR, ac_pc);
 	printf ( "0x%02X\n", count );
 	signed int res = op >> count;
-	dataManager.setMemOrReg2(res);
-	checkFlags(OPER_NONE,0,0,res,FLAG_ALL);
-	if ( count > 0 ) writeFlag(FLAG_CF, (op>>(count-1))&0x01);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	checkFlags(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+	if ( count > 0 ) writeFlag(SPR, FLAG_CF, (op>>(count-1))&0x01);
 }
 
 //!Instruction shr_rm32_imm8 behavior method
@@ -2979,15 +3058,15 @@ void ac_behavior( shr_rm32_imm8 )
 	printf ( "SHR RM32, IMM8\n" );
 	signed char count;
 	unsigned int op, res;
-	op = dataManager.getMemOrReg2();
+	op = dataManager.getMemOrReg2(MEM, GR);
 	if ( OperandSize == OPERAND_SIZE16 ) op = op & MASK_16BITS;
-	count = data.immediate8();
+	count = data.immediate8(SPR, ac_pc);
 	res = op >> count;
-	dataManager.setMemOrReg2(res);
-	checkFlags(OPER_NONE,0,0,res,FLAG_ALL);
-	if ( OperandSize == OPERAND_SIZE16 ) writeFlag(FLAG_OF, MSB16(op));
-	else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(FLAG_OF, MSB32(op));
-	if ( count > 0 ) writeFlag(FLAG_CF, (op>>(count-1))&0x01);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	checkFlags(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+	if ( OperandSize == OPERAND_SIZE16 ) writeFlag(SPR, FLAG_OF, MSB16(op));
+	else if ( OperandSize == OPERAND_SIZE32 ) writeFlag(SPR, FLAG_OF, MSB32(op));
+	if ( count > 0 ) writeFlag(SPR, FLAG_CF, (op>>(count-1))&0x01);
 }
 
 //!Instruction test_eax_imm32 behavior method.
@@ -2996,11 +3075,11 @@ void ac_behavior( test_eax_imm32 )
 	acprintf ( " TEST EAX, IMM32\n" );
 	uint op1, op2, aux;
 	op1 = GR.read(EAX);
-	op2 = data.immediate();
+	op2 = data.immediate(SPR, ac_pc);
 	aux = op1 & op2;
-	resetFlag ( FLAG_OF );
-	resetFlag ( FLAG_CF );
-	checkFlags ( OPER_NONE,op1,op2,aux,FLAG_SF|FLAG_ZF|FLAG_PF );
+	resetFlag ( SPR, FLAG_OF );
+	resetFlag ( SPR, FLAG_CF );
+	checkFlags (SPR, OPER_NONE,op1,op2,aux,FLAG_SF|FLAG_ZF|FLAG_PF );
 }
 
 //!Instruction test_rm32_r32 behavior method.
@@ -3008,19 +3087,19 @@ void ac_behavior( test_rm32_r32 )
 {
 	acprintf ( "TEST RM32, R32\n" );
 	uint op1, op2, res;
-	op1 = dataManager.getMemOrReg2();
-	op2 = dataManager.getReg1();
+	op1 = dataManager.getMemOrReg2(MEM, GR);
+	op2 = dataManager.getReg1(GR);
 	res = op1 & op2;
-	resetFlag ( FLAG_OF );
-	resetFlag ( FLAG_CF );
-	checkFlags ( OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF );
+	resetFlag ( SPR, FLAG_OF );
+	resetFlag ( SPR, FLAG_CF );
+	checkFlags (SPR, OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF );
 }
 
 //!Instruction ja_jnbe_rel8 behavior method.
 void ac_behavior( ja_jnbe_rel8 )
 {
 	acprintf ( " JA/JNBE REL8\n" );
-	if ( testFlag(FLAG_CF)==false && testFlag(FLAG_ZF)==false )
+	if ( testFlag(SPR, FLAG_CF)==false && testFlag(SPR, FLAG_ZF)==false )
 	{
 		if ( data.address8()&(1<<7) ) ac_pc-= ((~data.address8())+0x01);
 		else ac_pc+= data.address8();
@@ -3031,7 +3110,7 @@ void ac_behavior( ja_jnbe_rel8 )
 void ac_behavior( jae_jnb_jnc_rel8 )
 {
         acprintf ( " JAE/JNB/JNC REL8\n" );
-        if ( testFlag(FLAG_CF)==false )
+        if ( testFlag(SPR, FLAG_CF)==false )
         {
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
                 else ac_pc+= data.address8();
@@ -3042,7 +3121,7 @@ void ac_behavior( jae_jnb_jnc_rel8 )
 void ac_behavior( jb_jc_jnae_rel8 )
 {
         acprintf ( " JB/JC/JNAE REL8\n" );
-        if ( testFlag(FLAG_CF)==true )
+        if ( testFlag(SPR, FLAG_CF)==true )
         {
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
                 else ac_pc+= data.address8();
@@ -3053,7 +3132,7 @@ void ac_behavior( jb_jc_jnae_rel8 )
 void ac_behavior( jbe_jna_rel8 )
 {
         acprintf ( " JBE/JNA REL8\n" );
-        if ( (testFlag(FLAG_CF)==true) || (testFlag(FLAG_ZF)==true) )
+        if ( (testFlag(SPR, FLAG_CF)==true) || (testFlag(SPR, FLAG_ZF)==true) )
         {
 		printf ( "Branch taken\n" );
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
@@ -3065,7 +3144,7 @@ void ac_behavior( jbe_jna_rel8 )
 void ac_behavior( je_jz_rel8 )
 {
         acprintf ( " JE/JZ REL8\n" );
-        if ( testFlag(FLAG_ZF)==true )
+        if ( testFlag(SPR, FLAG_ZF)==true )
         {
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
                 else ac_pc+= data.address8();
@@ -3076,7 +3155,7 @@ void ac_behavior( je_jz_rel8 )
 void ac_behavior( jg_jnle_rel8 )
 {
         acprintf ( " JG/JNLE REL8\n" );
-        if ( testFlag(FLAG_ZF)==false && (testFlag(FLAG_SF)==testFlag(FLAG_OF)) )
+        if ( testFlag(SPR, FLAG_ZF)==false && (testFlag(SPR, FLAG_SF)==testFlag(SPR, FLAG_OF)) )
         {
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
                 else ac_pc+= data.address8();
@@ -3087,7 +3166,7 @@ void ac_behavior( jg_jnle_rel8 )
 void ac_behavior( jge_jnl_rel8 )
 {
         acprintf ( "JGE/JNL REL8\n" );
-        if ( testFlag(FLAG_SF)==testFlag(FLAG_OF) )
+        if ( testFlag(SPR, FLAG_SF)==testFlag(SPR, FLAG_OF) )
         {
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
                 else ac_pc+= data.address8();
@@ -3098,7 +3177,7 @@ void ac_behavior( jge_jnl_rel8 )
 void ac_behavior( jl_jnge_rel8 )
 {
         acprintf ( " JL/JNGE REL8\n" );
-        if ( testFlag(FLAG_SF)!=testFlag(FLAG_OF) )
+        if ( testFlag(SPR, FLAG_SF)!=testFlag(SPR, FLAG_OF) )
         {
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
                 else ac_pc+= data.address8();
@@ -3109,7 +3188,7 @@ void ac_behavior( jl_jnge_rel8 )
 void ac_behavior( jle_jng_rel8 )
 {
         acprintf ( "JLE/JNG REL8\n" );
-        if ( (testFlag(FLAG_ZF)==true) || ((testFlag(FLAG_SF)!=testFlag(FLAG_OF))) )
+        if ( (testFlag(SPR, FLAG_ZF)==true) || ((testFlag(SPR, FLAG_SF)!=testFlag(SPR, FLAG_OF))) )
         {
 		printf ( "Branch taken\n" );
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
@@ -3121,7 +3200,7 @@ void ac_behavior( jle_jng_rel8 )
 void ac_behavior( jne_jnz_rel8 )
 {
         acprintf ( " JNE/JNZ REL8\n" );
-        if ( testFlag(FLAG_ZF)==false )
+        if ( testFlag(SPR, FLAG_ZF)==false )
         {
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
                 else ac_pc+= data.address8();
@@ -3132,7 +3211,7 @@ void ac_behavior( jne_jnz_rel8 )
 void ac_behavior( jno_rel8 )
 {
         acprintf ( " JNO REL8\n" );
-        if ( testFlag(FLAG_OF)==false )
+        if ( testFlag(SPR, FLAG_OF)==false )
         {
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
                 else ac_pc+= data.address8();
@@ -3143,7 +3222,7 @@ void ac_behavior( jno_rel8 )
 void ac_behavior( jnp_jpo_rel8 )
 {
         acprintf ( " JNP/JPO REL8\n" );
-        if ( testFlag(FLAG_PF)==false )
+        if ( testFlag(SPR, FLAG_PF)==false )
         {
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
                 else ac_pc+= data.address8();
@@ -3154,7 +3233,7 @@ void ac_behavior( jnp_jpo_rel8 )
 void ac_behavior( jns_rel8 )
 {
         acprintf ( " JNS REL8\n" );
-        if ( testFlag(FLAG_SF)==false )
+        if ( testFlag(SPR, FLAG_SF)==false )
         {
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
                 else ac_pc+= data.address8();
@@ -3165,7 +3244,7 @@ void ac_behavior( jns_rel8 )
 void ac_behavior( jo_rel8 )
 {
         acprintf ( " JO REL8\n" );
-        if ( testFlag(FLAG_OF)==true )
+        if ( testFlag(SPR, FLAG_OF)==true )
         {
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
                 else ac_pc+= data.address8();
@@ -3176,7 +3255,7 @@ void ac_behavior( jo_rel8 )
 void ac_behavior( jp_jpe_rel8 )
 {
         acprintf ( " JP/JPE REL8\n" );
-        if ( testFlag(FLAG_PF)==true )
+        if ( testFlag(SPR, FLAG_PF)==true )
         {
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
                 else ac_pc+= data.address8();
@@ -3187,7 +3266,7 @@ void ac_behavior( jp_jpe_rel8 )
 void ac_behavior( js_rel8 )
 {
         acprintf ( " JS REL8\n" );
-        if ( testFlag(FLAG_SF)==true )
+        if ( testFlag(SPR, FLAG_SF)==true )
         {
                 if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
                 else ac_pc+= data.address8();
@@ -3197,9 +3276,10 @@ void ac_behavior( js_rel8 )
 //!Instruction jmp_rel8 behavior method.
 void ac_behavior( jmp_rel8 )
 {
-	printf ( "JMP REL8\n" );
-	signed char d = data.address8();
-	ac_pc+=d;
+      printf ( "JMP REL8\n" );
+      signed char d = data.address8();
+      ac_pc+=d;
+      SPR.write(EIP,(int)ac_pc);
 }
 
 //!Instruction jcxz_jecxz_rel8 behavior method.
@@ -3220,6 +3300,7 @@ void ac_behavior( jmp_rel32 )
 	acprintf("JMP "); acprinti(ac_pc+data.address()); acprintf("\n");
 	signed int rel = data.address();
 	ac_pc+= rel;
+        SPR.write(EIP,(int)ac_pc);
 }
 
 //!Instruction jmp_ptr16_32 behavior method.
@@ -3248,7 +3329,7 @@ void ac_behavior( loope_loopz_rel8 )
 	acprintf ( " LOOPE/LOOPZ REL8\n" );
 	uint aux = GR.read(ECX);
 	aux--;
-	if ( (aux > 0x00000000) && testFlag(FLAG_ZF)==true )
+	if ( (aux > 0x00000000) && testFlag(SPR, FLAG_ZF)==true )
 	{
 		if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
 		else ac_pc+= data.address8();
@@ -3262,7 +3343,7 @@ void ac_behavior( loopne_loopnz_rel8 )
 	acprintf ( " LOOPNE/LOOPNZ REL8\n" );
 	uint aux = GR.read(ECX);
 	aux--;
-	if ( (aux > 0x00000000) && testFlag(FLAG_ZF)==false )
+	if ( (aux > 0x00000000) && testFlag(SPR, FLAG_ZF)==false )
 	{
 		if ( data.address8()&(1<<7) ) ac_pc-=((~data.address8())+0x01);
 		else ac_pc+= data.address8();
@@ -3274,10 +3355,11 @@ void ac_behavior( loopne_loopnz_rel8 )
 void ac_behavior( call_rel32 )
 {
 	// acprintf ( "CALL REL32\t\t" );
-	push((int)ac_pc);
+	push(MEM, GR, (int)ac_pc);
 	signed int a = data.address();
 	acprintf("CALL "); acprinti(ac_pc+a); acprintf("\n");
 	ac_pc+= a;
+        SPR.write(EIP,(int)ac_pc);
 }
 
 //!Instruction call_ptr16_32 behavior method.
@@ -3290,7 +3372,7 @@ void ac_behavior( call_ptr16_32 )
 void ac_behavior( ret_near )
 {
 	acprintf ( "RET\n" );
-	ac_pc = pop();
+	ac_pc = pop(MEM, GR);
 	SPR.write(EIP,(int)ac_pc);
 }
 
@@ -3298,7 +3380,7 @@ void ac_behavior( ret_near )
 void ac_behavior( ret_far )
 {
 	acprintf ( "RET\n" );
-	ac_pc = pop();
+	ac_pc = pop(MEM, GR);
 	SPR.write(EIP,(int)ac_pc);
 }
 
@@ -3355,10 +3437,10 @@ void ac_behavior( lss_r32_m16_32 )
   acprintf ( "LSS R32, M16:32\n" );
   unsigned char b0 = MEM.read_byte(data.address());
   unsigned char b1 = MEM.read_byte(data.address()+1);
-  uint offset = readMemory(data.address()+2);
+  uint offset = readMemory(MEM, data.address()+2);
   uint ds_data = (b1<<8) + b0;
-  writeSRegister(SS, ds_data);
-  writeRegister(data.reg1(), offset);
+  writeSRegister(SR, SS, ds_data);
+  writeRegister(GR, data.reg1(), offset);
 }
 
 //!Instruction lfs_r32_m16_32 behavior method.
@@ -3367,10 +3449,10 @@ void ac_behavior( lfs_r32_m16_32 )
   acprintf ( "LFS R32,M16:32\n" );
   unsigned char b0 = MEM.read_byte(data.address());
   unsigned char b1 = MEM.read_byte(data.address()+1);
-  uint offset = readMemory(data.address()+2);
+  uint offset = readMemory(MEM, data.address()+2);
   uint ds_data = (b1<<8) + b0;
-  writeSRegister(FS, ds_data);
-  writeRegister(data.reg1(), offset);
+  writeSRegister(SR, FS, ds_data);
+  writeRegister(GR, data.reg1(), offset);
 }
 
 //!Instruction lgs_r32_m16_32 behavior method.
@@ -3379,20 +3461,20 @@ void ac_behavior( lgs_r32_m16_32 )
   acprintf ( "LGS R32,M16:32\n" );
   unsigned char b0 = MEM.read_byte(data.address());
   unsigned char b1 = MEM.read_byte(data.address()+1);
-  uint offset = readMemory(data.address()+2);
+  uint offset = readMemory(MEM, data.address()+2);
   uint ds_data = (b1<<8) + b0;
-  writeSRegister(GS, ds_data);
-  writeRegister(data.reg1(), offset);
+  writeSRegister(SR, GS, ds_data);
+  writeRegister(GR, data.reg1(), offset);
 }
 
 //!Instruction cmov_a_nbe_r32_rm32 behavior method.
 void ac_behavior( cmov_a_nbe_r32_rm32 )
 {
   acprintf ( "CMOVA/CMOVNBE R32, RM32\n" );
-  if ( (testFlag(FLAG_CF)==false) && (testFlag(FLAG_ZF)==false) )
+  if ( (testFlag(SPR, FLAG_CF)==false) && (testFlag(SPR, FLAG_ZF)==false) )
     {
-      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-      else writeRegister(data.reg1(), readRegister(data.reg2()));
+      if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+      else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
     }
 }
 
@@ -3400,10 +3482,10 @@ void ac_behavior( cmov_a_nbe_r32_rm32 )
 void ac_behavior( cmov_ae_nb_nc_r32_rm32 )
 {
   acprintf ( "CMOVAE/CMOVNB/CMOVNC R32, RM32\n" );
-  if ( testFlag(FLAG_CF)==false )
+  if ( testFlag(SPR, FLAG_CF)==false )
     {
-      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-      else writeRegister(data.reg1(), readRegister(data.reg2()));
+      if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+      else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
     }
 }
 
@@ -3411,10 +3493,10 @@ void ac_behavior( cmov_ae_nb_nc_r32_rm32 )
 void ac_behavior( cmov_b_c_nae_r32_rm32 )
 {
   acprintf ( "CMOVB/CMOVC/CMOVNAE R32, RM32\n" );
-  if ( testFlag(FLAG_CF)==true )
+  if ( testFlag(SPR, FLAG_CF)==true )
     {
-      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-      else writeRegister(data.reg1(), readRegister(data.reg2()));
+      if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+      else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
     }
 }
 
@@ -3422,10 +3504,10 @@ void ac_behavior( cmov_b_c_nae_r32_rm32 )
 void ac_behavior( cmov_be_na_r32_rm32 )
 {
   acprintf ( "CMOVBE/CMOVNA R32, RM32\n" );
-  if ( testFlag(FLAG_CF)==true && testFlag(FLAG_ZF)==true )
+  if ( testFlag(SPR, FLAG_CF)==true && testFlag(SPR, FLAG_ZF)==true )
     {
-      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-      else writeRegister(data.reg1(), readRegister(data.reg2()));
+      if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+      else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
     }
 }
 
@@ -3433,10 +3515,10 @@ void ac_behavior( cmov_be_na_r32_rm32 )
 void ac_behavior( cmov_e_z_r32_rm32 )
 {
   acprintf ( "CMOVE/CMOVZ R32, RM32\n" );
-  if ( testFlag(FLAG_ZF)==true )
+  if ( testFlag(SPR, FLAG_ZF)==true )
     {
-      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-      else writeRegister(data.reg1(), readRegister(data.reg2()));
+      if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+      else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
     }
 }
 
@@ -3444,10 +3526,10 @@ void ac_behavior( cmov_e_z_r32_rm32 )
 void ac_behavior( cmov_g_nle_r32_rm32 )
 {
   acprintf ( "CMOVG/CMOVNLE R32, RM32\n" );
-  if ( testFlag(FLAG_ZF)==false && (testFlag(FLAG_SF)==testFlag(FLAG_OF)) )
+  if ( testFlag(SPR, FLAG_ZF)==false && (testFlag(SPR, FLAG_SF)==testFlag(SPR, FLAG_OF)) )
     {
-      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-      else writeRegister(data.reg1(), readRegister(data.reg2()));
+      if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+      else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
     }
 }
 
@@ -3455,10 +3537,10 @@ void ac_behavior( cmov_g_nle_r32_rm32 )
 void ac_behavior( cmov_ge_nl_r32_rm32 )
 {
   acprintf ( "CMOVGE/CMOVNL R32, RM32\n" );
-  if ( testFlag(FLAG_SF)==testFlag(FLAG_OF) )
+  if ( testFlag(SPR, FLAG_SF)==testFlag(SPR, FLAG_OF) )
     {
-      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-      else writeRegister(data.reg1(), readRegister(data.reg2()));
+      if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+      else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
     }
 }
 
@@ -3466,10 +3548,10 @@ void ac_behavior( cmov_ge_nl_r32_rm32 )
 void ac_behavior( cmov_l_nge_r32_rm32 )
 {
   acprintf ( "CMOVL/CMOVNGE R32, RM32\n" );
-  if ( testFlag(FLAG_SF)!=testFlag(FLAG_OF) )
+  if ( testFlag(SPR, FLAG_SF)!=testFlag(SPR, FLAG_OF) )
     {
-      if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-      else writeRegister(data.reg1(), readRegister(data.reg2()));
+      if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+      else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
     }
 }
 
@@ -3477,10 +3559,10 @@ void ac_behavior( cmov_l_nge_r32_rm32 )
 void ac_behavior( cmov_le_ng_r32_rm32 )
 {
 	acprintf ( "CMOVLE/CMOVNG R32, RM32\n" );
-	if ( testFlag(FLAG_ZF)==true || (testFlag(FLAG_SF)!=testFlag(FLAG_OF)) )
+	if ( testFlag(SPR, FLAG_ZF)==true || (testFlag(SPR, FLAG_SF)!=testFlag(SPR, FLAG_OF)) )
 	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
+                if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+                else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
 	}
 }
 
@@ -3488,10 +3570,10 @@ void ac_behavior( cmov_le_ng_r32_rm32 )
 void ac_behavior( cmov_ne_nz_r32_rm32 )
 {
 	acprintf ( "CMOVNE/CMOVNZ R32, RM32\n" );
-	if ( testFlag(FLAG_ZF)==false )
+	if ( testFlag(SPR, FLAG_ZF)==false )
 	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
+                if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+                else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
 	}
 }
 
@@ -3499,10 +3581,10 @@ void ac_behavior( cmov_ne_nz_r32_rm32 )
 void ac_behavior( cmov_no_r32_rm32 )
 {
 	acprintf ( "CMOVNO R32, RM32\n" );
-	if ( testFlag(FLAG_OF)==false )
+	if ( testFlag(SPR, FLAG_OF)==false )
 	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
+                if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+                else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
 	}
 }
 
@@ -3510,10 +3592,10 @@ void ac_behavior( cmov_no_r32_rm32 )
 void ac_behavior( cmov_np_po_r32_rm32 )
 {
 	acprintf ( "CMOVNP/CMOVPO R32, RM32\n" );
-	if ( testFlag(FLAG_PF)==false )
+	if ( testFlag(SPR, FLAG_PF)==false )
 	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
+                if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+                else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
 	}
 }
 
@@ -3521,10 +3603,10 @@ void ac_behavior( cmov_np_po_r32_rm32 )
 void ac_behavior( cmov_ns_r32_rm32 )
 {
 	acprintf ( "CMOVNS R32, RM32\n" );
-	if ( testFlag(FLAG_SF)==false )
+	if ( testFlag(SPR, FLAG_SF)==false )
 	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
+                if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+                else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
 	}
 }
 
@@ -3532,10 +3614,10 @@ void ac_behavior( cmov_ns_r32_rm32 )
 void ac_behavior( cmov_o_r32_rm32 )
 {
 	acprintf ( "CMOVO R32, RM32\n" );
-	if ( testFlag(FLAG_OF)==true )
+	if ( testFlag(SPR, FLAG_OF)==true )
 	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
+                if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+                else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
 	}
 }
 
@@ -3543,10 +3625,10 @@ void ac_behavior( cmov_o_r32_rm32 )
 void ac_behavior( cmov_p_pe_r32_rm32 )
 {
 	acprintf ( "CMOVP/CMOVPE R32, RM32\n" );
-	if ( testFlag(FLAG_PF)==true )
+	if ( testFlag(SPR, FLAG_PF)==true )
 	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
+                if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+                else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
 	}
 }
 
@@ -3554,10 +3636,10 @@ void ac_behavior( cmov_p_pe_r32_rm32 )
 void ac_behavior( cmov_s_r32_rm32 )
 {
 	acprintf ( "CMOVS R32, RM32\n" );
-	if ( testFlag(FLAG_SF)==true )
+	if ( testFlag(SPR, FLAG_SF)==true )
 	{
-                if ( data.usesMemory() ) writeRegister(data.reg1(),readMemory(data.address()));
-                else writeRegister(data.reg1(), readRegister(data.reg2()));
+                if ( data.usesMemory() ) writeRegister(GR, data.reg1(),readMemory(MEM, data.address()));
+                else writeRegister(GR, data.reg1(), readRegister(GR, data.reg2()));
 	}
 }
 
@@ -3568,21 +3650,21 @@ void ac_behavior( xadd_rm32_r32 )
 	uint op1, op2, aux;
 	if ( data.usesMemory() )
 	{
-		op1 = readMemory(data.address());
-		op2 = readRegister(data.reg1());
-		writeRegister(data.reg1(),op1);
+		op1 = readMemory(MEM, data.address());
+		op2 = readRegister(GR, data.reg1());
+		writeRegister(GR, data.reg1(),op1);
 		aux = op1 + op2;
-		writeMemory(data.address(),aux);
+		writeMemory(MEM, data.address(),aux);
 	}
 	else
 	{
-		op1 = readRegister(data.reg2());
-		op2 = readRegister(data.reg1());
-		writeRegister(data.reg1(),op1);
+		op1 = readRegister(GR, data.reg2());
+		op2 = readRegister(GR, data.reg1());
+		writeRegister(GR, data.reg1(),op1);
 		aux = op1 + op2;
-		writeRegister(data.reg2(),aux);
+		writeRegister(GR, data.reg2(),aux);
 	}
-	checkFlags(OPER_ADD,op1,op2,aux,FLAG_ALL);
+	checkFlags(SPR, OPER_ADD,op1,op2,aux,FLAG_ALL);
 }
 
 //!Instruction cmpxchg_rm32_r32 behavior method.
@@ -3592,25 +3674,25 @@ void ac_behavior( cmpxchg_rm32_r32 )
 	uint op1, op2, aux;
 	if ( data.usesMemory() )
 	{
-		op1 = readMemory(data.address());
-		op2 = readRegister(data.reg1());
-		aux = op1 + (~readRegister(EAX)) + 0x01;
-		if ( readRegister(EAX)==op1 )
-			writeMemory(data.address(), op2);
+		op1 = readMemory(MEM, data.address());
+		op2 = readRegister(GR, data.reg1());
+		aux = op1 + (~readRegister(GR, EAX)) + 0x01;
+		if ( readRegister(GR, EAX)==op1 )
+			writeMemory(MEM, data.address(), op2);
 		else
-			writeRegister(EAX,op1);
+			writeRegister(GR, EAX,op1);
 	}
 	else
 	{
-		op1 = readRegister(data.reg2());
-		op2 = readRegister(data.reg1());
-		aux = op1 + (~readRegister(EAX)) + 0x01;
-		if ( readRegister(EAX)==op1 )
-			writeRegister(data.reg2(),op2);
+		op1 = readRegister(GR, data.reg2());
+		op2 = readRegister(GR, data.reg1());
+		aux = op1 + (~readRegister(GR, EAX)) + 0x01;
+		if ( readRegister(GR, EAX)==op1 )
+			writeRegister(GR, data.reg2(),op2);
 		else
-			writeRegister(EAX,op1);
+			writeRegister(GR, EAX,op1);
 	}
-	checkFlags(OPER_SUB,op1,GR.read(EAX),aux,FLAG_ALL);
+	checkFlags(SPR, OPER_SUB,op1,GR.read(EAX),aux,FLAG_ALL);
 }
 
 //!Instruction cmpxchg8b_m64 behavior method.
@@ -3618,20 +3700,20 @@ void ac_behavior( cmpxchg8b_m64 )
 {
 	acprintf ( "CMPXCHG8B M64\n" );
 	unsigned long long dest, edxeax, aux;
-	dest = (((unsigned long long)readMemory(data.address()))<<32)+readMemory(data.address()+4);
-	edxeax = (((unsigned long long)readRegister(EDX))<<32) + readRegister(EAX);
+	dest = (((unsigned long long)readMemory(MEM, data.address()))<<32)+readMemory(MEM, data.address()+4);
+	edxeax = (((unsigned long long)readRegister(GR, EDX))<<32) + readRegister(GR, EAX);
 	aux = dest + (~edxeax) + 0x01;
 	if ( edxeax == dest )
 	{
-		writeMemory(data.address(), readRegister(EBX));
-		writeMemory(data.address()+4, readRegister(ECX));
-		setFlag(FLAG_ZF);
+		writeMemory(MEM, data.address(), readRegister(GR, EBX));
+		writeMemory(MEM, data.address()+4, readRegister(GR, ECX));
+		setFlag(SPR, FLAG_ZF);
 	}
 	else
 	{
-		writeRegister(EDX, (dest>>32));
-		writeRegister(EAX, dest&0xFFFFFFFF);
-		resetFlag(FLAG_ZF);
+		writeRegister(GR, EDX, (dest>>32));
+		writeRegister(GR, EAX, dest&0xFFFFFFFF);
+		resetFlag(SPR, FLAG_ZF);
 	}
 }
 
@@ -3648,10 +3730,10 @@ void ac_behavior( movsx_r32_rm8 )
 	}
 	else
 	{
-		op = readRegister8(data.reg2());
+		op = readRegister8(GR, data.reg2());
 		res = op;
 	}
-	writeRegister(data.reg1(),res);
+	writeRegister(GR, data.reg1(),res);
 }
 
 //!Instruction movsx_r32_rm16 behavior method.
@@ -3672,7 +3754,7 @@ void ac_behavior( movsx_r32_rm16 )
 		else printf ( "%s\n", reg_str[data.reg2()] );
 	}
 	res = op;
-	writeRegister(data.reg1(),res);
+	writeRegister(GR, data.reg1(),res);
 }
 
 //!Instruction movzx_r32_rm8 behavior method.
@@ -3681,8 +3763,8 @@ void ac_behavior( movzx_r32_rm8 )
 	acprintf ( "MOVZX R32, RM8\n" );
 	unsigned char op;
 	if ( data.usesMemory() ) op = MEM.read_byte(data.address());
-	else op = readRegister8(data.reg2());
-	writeRegister(data.reg1(),op);
+	else op = readRegister8(GR, data.reg2());
+	writeRegister(GR, data.reg1(),op);
 }
 
 //!Instruction movzx_r32_rm16 behavior method.
@@ -3691,8 +3773,8 @@ void ac_behavior( movzx_r32_rm16 )
 	acprintf ( "MOVZX R32, RM16\n" );
 	unsigned short op;
 	if ( data.usesMemory() ) op = MEM.read_half(data.address());
-	else op = (readRegister(data.reg2())&MASK_16BITS);
-	writeRegister(data.reg1(),op);
+	else op = (readRegister(GR, data.reg2())&MASK_16BITS);
+	writeRegister(GR, data.reg1(),op);
 }
 
 //!Instruction shrd_rm32_r32_imm8 behavior method.
@@ -3705,16 +3787,16 @@ void ac_behavior( shrd_rm32_r32_imm8 )
 	}
 	else if ( OperandSize == OPERAND_SIZE32 )
 	{
-		signed char count = data.immediate8();
-		unsigned int op1 = dataManager.getMemOrReg2();
-		unsigned long long op2 = dataManager.getReg1();
+		signed char count = data.immediate8(SPR, ac_pc);
+		unsigned int op1 = dataManager.getMemOrReg2(MEM, GR);
+		unsigned long long op2 = dataManager.getReg1(GR);
 		unsigned long long op = (op2<<32)|(op1);
 		unsigned long long res = op >> count;
-		dataManager.setMemOrReg2(res);
-		dataManager.setReg1(res>>31);
-		if ( count > 0 ) checkFlags(OPER_NONE,0,0,res,FLAG_ALL);
-		if ( count > 0 ) writeFlag(FLAG_CF, (op>>(count-1))&0x01);
-		if ( count == 1 ) writeFlag(FLAG_OF, MSB32(op1) != MSB32(res));
+		dataManager.setMemOrReg2(MEM, GR, res);
+		dataManager.setReg1(GR, res>>31);
+		if ( count > 0 ) checkFlags(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+		if ( count > 0 ) writeFlag(SPR, FLAG_CF, (op>>(count-1))&0x01);
+		if ( count == 1 ) writeFlag(SPR, FLAG_OF, MSB32(op1) != MSB32(res));
 	}
 }
 
@@ -3734,16 +3816,16 @@ void ac_behavior( shld_rm32_r32_imm8 )
 	}
 	else if ( OperandSize == OPERAND_SIZE32 )
 	{
-		signed char count = data.immediate8();
-		unsigned long long op1 =dataManager.getMemOrReg2();
-		unsigned int op2 = dataManager.getReg1();
+		signed char count = data.immediate8(SPR, ac_pc);
+		unsigned long long op1 =dataManager.getMemOrReg2(MEM, GR);
+		unsigned int op2 = dataManager.getReg1(GR);
 		unsigned long long op = (op1<<32)|(op2);
 		unsigned long long res = op << count;
-		dataManager.setMemOrReg2(res>>32);
-		dataManager.setReg1(res>>1);
-		if ( count > 0 ) checkFlags(OPER_NONE,0,0,res,FLAG_ALL);
-		if ( count > 0 ) writeFlag(FLAG_CF, MSB32(op<<(count-1)) );
-		if ( count == 1 ) writeFlag(FLAG_OF, MSB32(op1) != MSB32(res));
+		dataManager.setMemOrReg2(MEM, GR, res>>32);
+		dataManager.setReg1(GR, res>>1);
+		if ( count > 0 ) checkFlags(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+		if ( count > 0 ) writeFlag(SPR, FLAG_CF, MSB32(op<<(count-1)) );
+		if ( count == 1 ) writeFlag(SPR, FLAG_OF, MSB32(op1) != MSB32(res));
 	}
 }
 
@@ -3759,13 +3841,13 @@ void ac_behavior( bt_rm32_r32 )
 	acprintf ( " BT RM32,R32\n" );
 	if ( data.usesMemory() )
 	{
-		if ( testMemBit(data.address(), data.reg1()) ) setFlag(FLAG_CF);
-		else resetFlag ( FLAG_CF );
+		if ( testMemBit(MEM, data.address(), data.reg1()) ) setFlag(SPR, FLAG_CF);
+		else resetFlag ( SPR, FLAG_CF );
 	}
 	else
 	{
-		if ( testBit ( readRegister(data.reg2()), readRegister(data.reg1()) ) ) setFlag(FLAG_CF);
-		else resetFlag ( FLAG_CF );
+		if ( testBit ( readRegister(GR, data.reg2()), readRegister(GR, data.reg1()) ) ) setFlag(SPR, FLAG_CF);
+		else resetFlag ( SPR, FLAG_CF );
 	}
 }
 
@@ -3773,17 +3855,17 @@ void ac_behavior( bt_rm32_r32 )
 void ac_behavior( bt_rm32_imm8 )
 {
 	acprintf ( "BT RM32, IMM8\n" );
-	signed char i = data.immediate8();
+	signed char i = data.immediate8(SPR, ac_pc);
 	signed int op = i;
 	if ( data.usesMemory() )
 	{
-		if ( testMemBit(data.address(), op) ) setFlag(FLAG_CF);
-		else resetFlag ( FLAG_CF );
+		if ( testMemBit(MEM, data.address(), op) ) setFlag(SPR, FLAG_CF);
+		else resetFlag ( SPR, FLAG_CF );
 	}
 	else
 	{
-		if ( testBit ( readRegister(data.reg2()), op ) ) setFlag(FLAG_CF);
-		else resetFlag ( FLAG_CF );
+		if ( testBit ( readRegister(GR, data.reg2()), op ) ) setFlag(SPR, FLAG_CF);
+		else resetFlag ( SPR, FLAG_CF );
 	}
 }
 
@@ -3794,15 +3876,15 @@ void ac_behavior( bts_rm32_r32 )
         acprintf ( "BTS RM32,R32\n" );
         if ( data.usesMemory() )
         {
-		if ( testMemBit(data.address(),GR.read(data.reg1())) ) setFlag ( FLAG_CF );
-		else resetFlag ( FLAG_CF );
-		setMemBit ( data.address(), GR.read(data.reg1()) );
+		if ( testMemBit(MEM, data.address(),GR.read(data.reg1())) ) setFlag(SPR, FLAG_CF );
+		else resetFlag ( SPR, FLAG_CF );
+		setMemBit(MEM,  data.address(), GR.read(data.reg1()) );
         }
         else
         {
 		target = GR.read(data.reg2());
-		if ( testBit ( target, GR.read(data.reg1()) ) ) setFlag(FLAG_CF);
-		else resetFlag ( FLAG_CF );
+		if ( testBit ( target, GR.read(data.reg1()) ) ) setFlag(SPR, FLAG_CF);
+		else resetFlag ( SPR, FLAG_CF );
 		setBit ( &target, GR.read(data.reg1()) );
 		GR.write(data.reg2(),target);
         }
@@ -3815,15 +3897,15 @@ void ac_behavior( btr_rm32_r32 )
         acprintf ( "BTR RM32,R32\n" );
         if ( data.usesMemory() )
         {
-                if ( testMemBit(data.address(),GR.read(data.reg1())) ) setFlag ( FLAG_CF );
-                else resetFlag ( FLAG_CF );
-                resetMemBit ( data.address(), GR.read(data.reg1()) );
+                if ( testMemBit(MEM, data.address(),GR.read(data.reg1())) ) setFlag(SPR, FLAG_CF );
+                else resetFlag ( SPR, FLAG_CF );
+                resetMemBit(MEM,  data.address(), GR.read(data.reg1()) );
         }
         else
         {
                 target = GR.read(data.reg2());
-                if ( testBit ( target, GR.read(data.reg1()) ) ) setFlag(FLAG_CF);
-                else resetFlag ( FLAG_CF );
+                if ( testBit ( target, GR.read(data.reg1()) ) ) setFlag(SPR, FLAG_CF);
+                else resetFlag ( SPR, FLAG_CF );
                 resetBit ( &target, GR.read(data.reg1()) );
                 GR.write(data.reg2(),target);
         }
@@ -3836,15 +3918,15 @@ void ac_behavior( btc_rm32_r32 )
         acprintf ( "BTC RM32,R32\n" );
         if ( data.usesMemory() )
         {
-                if ( testMemBit(data.address(),GR.read(data.reg1())) ) setFlag ( FLAG_CF );
-                else resetFlag ( FLAG_CF );
-                compMemBit ( data.address(), GR.read(data.reg1()) );
+                if ( testMemBit(MEM, data.address(),GR.read(data.reg1())) ) setFlag(SPR, FLAG_CF );
+                else resetFlag ( SPR, FLAG_CF );
+                compMemBit(MEM,  data.address(), GR.read(data.reg1()) );
         }
         else
         {
                 target = GR.read(data.reg2());
-                if ( testBit ( target, GR.read(data.reg1()) ) ) setFlag(FLAG_CF);
-                else resetFlag ( FLAG_CF );
+                if ( testBit ( target, GR.read(data.reg1()) ) ) setFlag(SPR, FLAG_CF);
+                else resetFlag ( SPR, FLAG_CF );
                 compBit ( &target, GR.read(data.reg1()) );
                 GR.write(data.reg2(),target);
         }
@@ -3855,28 +3937,32 @@ void ac_behavior( bsf_r32_rm32 )
 {
 	acprintf ( "BSF R32, RM32\n" );
 	uint source, index=32;
-	if ( data.usesMemory() ) source = readMemory(data.address());
-	else source = readRegister(data.reg2());
+	if ( data.usesMemory() ) source = readMemory(MEM, data.address());
+	else source = readRegister(GR, data.reg2());
 	for ( uint i=0; i<32; i++ )
 		if (testBit(source,i)) index = i;
-	if ( index > 31 ) setFlag ( FLAG_ZF );
-	else resetFlag ( FLAG_ZF );
-	writeRegister(data.reg1(),index);
+	if ( index > 31 ) setFlag(SPR, FLAG_ZF );
+	else resetFlag ( SPR, FLAG_ZF );
+	writeRegister(GR, data.reg1(),index);
 }
 
 //!Instruction bsr_r32_rm32 behavior method.
 void ac_behavior( bsr_r32_rm32 )
 {
-	acprintf ( "BSR R32, RM32\n" );
-	uint source, index = 32;
-	if ( data.usesMemory() ) source = readMemory(data.address());
-	else source = readRegister(data.reg2());
-	for ( uint i=31; i>=0; i-- )
-		if ( testBit(source,i)) index = i;
-	if ( index > 31 ) setFlag ( FLAG_ZF );
-	else resetFlag ( FLAG_ZF );
-	writeRegister(data.reg1(),index);
+        acprintf ( "BSR R32, RM32\n" );
+        uint source, index = 32;
+        if ( data.usesMemory() ) source = readMemory(MEM, data.address());
+        else source = readRegister(GR, data.reg2());
+        for ( int i=31; i>=0; i-- )
+                if ( testBit(source,i)) {
+                  index = i;
+                  break;
+                }
+        if ( index < 31 ) setFlag(SPR, FLAG_ZF );
+        else resetFlag ( SPR, FLAG_ZF );
+        writeRegister(GR, data.reg1(),index);
 }
+
 
 //!Instruction seta_setnbe_rm8 behavior method.
 void ac_behavior( seta_setnbe_rm8 )
@@ -3888,15 +3974,15 @@ void ac_behavior( seta_setnbe_rm8 )
 void ac_behavior( setae_setnb_setnc_rm8 )
 {
   acprintf ( "SETAE/SETNB/SETNC RM8\n" );
-  if ( testFlag(FLAG_CF)==false )
+  if ( testFlag(SPR, FLAG_CF)==false )
     {
       if ( data.usesMemory() ) MEM.write_byte(data.address(),1);
-      else writeRegister8(data.reg2(),1);
+      else writeRegister8(GR, data.reg2(),1);
     }
   else
     {
       if ( data.usesMemory() ) MEM.write_byte(data.address(),0);
-      else writeRegister8(data.reg2(),0);
+      else writeRegister8(GR, data.reg2(),0);
     }
 }
 
@@ -3988,7 +4074,7 @@ void ac_behavior( sets_rm8 )
 void ac_behavior( ja_jnbe_rel16_32 )
 {
   acprintf ( " JA/JNBE REL32\n" );
-  if ( testFlag(FLAG_CF)==false && testFlag(FLAG_ZF)==false )
+  if ( testFlag(SPR, FLAG_CF)==false && testFlag(SPR, FLAG_ZF)==false )
     {
       if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
       else ac_pc+= data.address();
@@ -3999,7 +4085,7 @@ void ac_behavior( ja_jnbe_rel16_32 )
 void ac_behavior( jae_jnb_jnc_rel16_32 )
 {
   acprintf ( " JAE/JNB/JNC REL32\n" );
-  if ( testFlag(FLAG_CF)==false )
+  if ( testFlag(SPR, FLAG_CF)==false )
     {
       if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
       else ac_pc+= data.address();
@@ -4010,7 +4096,7 @@ void ac_behavior( jae_jnb_jnc_rel16_32 )
 	void ac_behavior( jb_jc_jnae_rel16_32 )
 	{
 		acprintf ( " JB/JC/JNAE REL32\n" );
-		if ( testFlag(FLAG_CF)==true )
+		if ( testFlag(SPR, FLAG_CF)==true )
 		{
 			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
 			else ac_pc+= data.address();
@@ -4021,7 +4107,7 @@ void ac_behavior( jae_jnb_jnc_rel16_32 )
 	void ac_behavior( jbe_jna_rel16_32 )
 	{
 		acprintf ( " JBE/JNA REL32\n" );
-		if ( testFlag(FLAG_CF)==true || testFlag(FLAG_ZF)==true )
+		if ( testFlag(SPR, FLAG_CF)==true || testFlag(SPR, FLAG_ZF)==true )
 		{
 			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
 			else ac_pc+= data.address();
@@ -4032,7 +4118,7 @@ void ac_behavior( jae_jnb_jnc_rel16_32 )
 	void ac_behavior( je_jz_rel16_32 )
 	{
 		acprintf ( " JE/JZ REL32\n" );
-		if ( testFlag(FLAG_ZF)==true )
+		if ( testFlag(SPR, FLAG_ZF)==true )
 		{
 			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
 			else ac_pc+= data.address();
@@ -4043,7 +4129,7 @@ void ac_behavior( jae_jnb_jnc_rel16_32 )
 	void ac_behavior( jg_jnle_rel16_32 )
 	{
 		acprintf ( " JG/JNLE REL32\n" );
-		if ( testFlag(FLAG_ZF)==false && (testFlag(FLAG_SF)==testFlag(FLAG_OF)) )
+		if ( testFlag(SPR, FLAG_ZF)==false && (testFlag(SPR, FLAG_SF)==testFlag(SPR, FLAG_OF)) )
 		{
 			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
 			else ac_pc+= data.address();
@@ -4054,7 +4140,7 @@ void ac_behavior( jae_jnb_jnc_rel16_32 )
 	void ac_behavior( jge_jnl_rel16_32 )
 	{
 		acprintf ( " JGE/JNL REL32\n" );
-		if ( testFlag(FLAG_SF)==testFlag(FLAG_OF) )
+		if ( testFlag(SPR, FLAG_SF)==testFlag(SPR, FLAG_OF) )
 		{
 			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
 			else ac_pc+= data.address();
@@ -4065,7 +4151,7 @@ void ac_behavior( jae_jnb_jnc_rel16_32 )
 	void ac_behavior( jl_jnge_rel16_32 )
 	{
 		acprintf ( " JL/JNGE REL32\n" );
-		if ( testFlag(FLAG_SF)!=testFlag(FLAG_OF) )
+		if ( testFlag(SPR, FLAG_SF)!=testFlag(SPR, FLAG_OF) )
 		{
 			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
 			else ac_pc+= data.address();
@@ -4076,7 +4162,7 @@ void ac_behavior( jae_jnb_jnc_rel16_32 )
 	void ac_behavior( jle_jng_rel16_32 )
 	{
 		acprintf ( " JLE/JNG REL32\n" );
-		if ( testFlag(FLAG_ZF)==true || (testFlag(FLAG_SF)!=testFlag(FLAG_OF)) )
+		if ( testFlag(SPR, FLAG_ZF)==true || (testFlag(SPR, FLAG_SF)!=testFlag(SPR, FLAG_OF)) )
 		{
 			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
 			else ac_pc+= data.address();
@@ -4087,7 +4173,7 @@ void ac_behavior( jae_jnb_jnc_rel16_32 )
 	void ac_behavior( jne_jnz_rel16_32 )
 	{
 		acprintf ( " JNE/JNZ REL32\n" );
-		if ( testFlag(FLAG_ZF)==false )
+		if ( testFlag(SPR, FLAG_ZF)==false )
 		{
 			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
 			else ac_pc+= data.address();
@@ -4098,7 +4184,7 @@ void ac_behavior( jae_jnb_jnc_rel16_32 )
 	void ac_behavior( jno_rel16_32 )
 	{
 		acprintf ( " JNO REL32\n" );
-		if ( testFlag(FLAG_OF)==false )
+		if ( testFlag(SPR, FLAG_OF)==false )
 		{
 			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
 			else ac_pc+= data.address();
@@ -4109,7 +4195,7 @@ void ac_behavior( jae_jnb_jnc_rel16_32 )
 	void ac_behavior( jnp_jpo_rel16_32 )
 	{
 		acprintf ( " JNP/JPO REL32\n" );
-		if ( testFlag(FLAG_PF)==false )
+		if ( testFlag(SPR, FLAG_PF)==false )
 		{
 			if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
 			else ac_pc+= data.address();
@@ -4120,7 +4206,7 @@ void ac_behavior( jae_jnb_jnc_rel16_32 )
 void ac_behavior( jns_rel16_32 )
 {
   acprintf ( " JNS REL32\n" );
-  if ( testFlag(FLAG_SF)==false )
+  if ( testFlag(SPR, FLAG_SF)==false )
     {
       if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
       else ac_pc+= data.address();
@@ -4131,7 +4217,7 @@ void ac_behavior( jns_rel16_32 )
 void ac_behavior( jo_rel16_32 )
 {
   acprintf ( " JO REL32\n" );
-  if ( testFlag(FLAG_OF)==true )
+  if ( testFlag(SPR, FLAG_OF)==true )
     {
       if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
       else ac_pc+= data.address();
@@ -4142,7 +4228,7 @@ void ac_behavior( jo_rel16_32 )
 void ac_behavior( jp_jpe_rel16_32 )
 {
   acprintf ( " JP/JPE REL32\n" );
-  if ( testFlag(FLAG_PF)==true )
+  if ( testFlag(SPR, FLAG_PF)==true )
     {
       if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
       else ac_pc+= data.address();
@@ -4153,10 +4239,11 @@ void ac_behavior( jp_jpe_rel16_32 )
 void ac_behavior( js_rel16_32 )
 {
   acprintf ( " JS REL32\n" );
-  if ( testFlag(FLAG_SF)==true )
+  if ( testFlag(SPR, FLAG_SF)==true )
     {
       if ( data.address()&(1<<31) ) ac_pc-=((~data.address())+0x01);
       else ac_pc+= data.address();
+      SPR.write(EIP,(int)ac_pc);
     }
 }
 
@@ -4164,21 +4251,21 @@ void ac_behavior( js_rel16_32 )
 void ac_behavior( bts_rm32_imm8 )
 {
   acprintf ( " BTS RM32, IMM8\n" );
-  signed char i = data.immediate8();
+  signed char i = data.immediate8(SPR, ac_pc);
   int op = i;
   uint target;
   acprintf ( " BTS RM32,R32\n" );
   if ( data.usesMemory() )
     {
-      if ( testMemBit(data.address(),op) ) setFlag ( FLAG_CF );
-      else resetFlag ( FLAG_CF );
-      setMemBit ( data.address(), op );
+      if ( testMemBit(MEM, data.address(),op) ) setFlag(SPR, FLAG_CF );
+      else resetFlag ( SPR, FLAG_CF );
+      setMemBit(MEM,  data.address(), op );
     }
   else
     {
       target = GR.read(data.reg2());
-      if ( testBit ( target, op ) ) setFlag(FLAG_CF);
-      else resetFlag ( FLAG_CF );
+      if ( testBit ( target, op ) ) setFlag(SPR, FLAG_CF);
+      else resetFlag ( SPR, FLAG_CF );
       setBit ( &target, op );
       GR.write(data.reg2(),target);
     }
@@ -4188,20 +4275,20 @@ void ac_behavior( bts_rm32_imm8 )
 void ac_behavior( btr_rm32_imm8 )
 {
   acprintf ( " BTR RM32, IMM8\n" );
-  signed char i = data.immediate8();
+  signed char i = data.immediate8(SPR, ac_pc);
   int op = i;
   uint target;
   if ( data.usesMemory() )
     {
-      if ( testMemBit(data.address(),op) ) setFlag ( FLAG_CF );
-      else resetFlag ( FLAG_CF );
-      resetMemBit ( data.address(), op );
+      if ( testMemBit(MEM, data.address(),op) ) setFlag(SPR, FLAG_CF );
+      else resetFlag ( SPR, FLAG_CF );
+      resetMemBit(MEM, data.address(), op );
     }
   else
     {
       target = GR.read(data.reg2());
-      if ( testBit ( target, op ) ) setFlag(FLAG_CF);
-      else resetFlag ( FLAG_CF );
+      if ( testBit ( target, op ) ) setFlag(SPR, FLAG_CF);
+      else resetFlag ( SPR, FLAG_CF );
       resetBit ( &target, op );
       GR.write(data.reg2(),target);
     }
@@ -4211,20 +4298,20 @@ void ac_behavior( btr_rm32_imm8 )
 void ac_behavior( btc_rm32_imm8 )
 {
   acprintf ( " BTC RM32, IMM8\n" );
-  signed char i =data.immediate8();
+  signed char i =data.immediate8(SPR, ac_pc);
   int op = i;
   uint target;
   if ( data.usesMemory() )
     {
-      if ( testMemBit(data.address(),op) ) setFlag ( FLAG_CF );
-      else resetFlag ( FLAG_CF );
-      compMemBit ( data.address(), op );
+      if ( testMemBit(MEM, data.address(),op) ) setFlag(SPR, FLAG_CF );
+      else resetFlag ( SPR, FLAG_CF );
+      compMemBit(MEM,  data.address(), op );
     }
   else
     {
       target = GR.read(data.reg2());
-      if ( testBit ( target, op ) ) setFlag(FLAG_CF);
-      else resetFlag ( FLAG_CF );
+      if ( testBit ( target, op ) ) setFlag(SPR, FLAG_CF);
+      else resetFlag ( SPR, FLAG_CF );
       compBit ( &target, op );
       GR.write(data.reg2(),target);
     }
@@ -4235,10 +4322,10 @@ void ac_behavior( inc_rm32 )
 {
   acprintf ( "INC RM32\n" );
   uint op, res;
-  op = dataManager.getMemOrReg2();
+  op = dataManager.getMemOrReg2(MEM, GR);
   res = op + 1;
-  dataManager.setMemOrReg2(res);
-  checkFlags(OPER_ADD,op,1,res,FLAG_ALL&(~FLAG_CF));
+  dataManager.setMemOrReg2(MEM, GR, res);
+  checkFlags(SPR, OPER_ADD,op,1,res,FLAG_ALL&(~FLAG_CF));
 }
 
 //!Instruction dec_rm32 behavior method
@@ -4248,20 +4335,20 @@ void ac_behavior( dec_rm32 )
   if ( OperandSize == OPERAND_SIZE16 )
     {
       ushort op1, op2, res;
-      op1 = dataManager.getMemOrReg2();
+      op1 = dataManager.getMemOrReg2(MEM, GR);
       op2 = 1;
       res = op1 - op2;
-      dataManager.setMemOrReg2(res);
-      checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+      dataManager.setMemOrReg2(MEM, GR, res);
+      checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
     }
   else if ( OperandSize == OPERAND_SIZE32 )
     {
       uint op1, op2, res;
-      op1 = dataManager.getMemOrReg2();
+      op1 = dataManager.getMemOrReg2(MEM, GR);
       op2 = 1;
       res = op1 - op2;
-      dataManager.setMemOrReg2(res);
-      checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+      dataManager.setMemOrReg2(MEM, GR, res);
+      checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
     }
 }
 
@@ -4271,6 +4358,7 @@ void ac_behavior( jmp_rm32 )
   acprintf ( " JMP RM32\n" );
   if (data.usesMemory()) ac_pc=MEM.read(data.address());
   else ac_pc=GR.read(data.reg2());
+  SPR.write(EIP,(int)ac_pc);
 }
 
 //!Instruction jmp_m16_32 behavior method
@@ -4283,9 +4371,10 @@ void ac_behavior( jmp_m16_32 )
 void ac_behavior( call_rm32 )
 {
   acprintf ( " CALL RM32\n" );
-  push(ac_pc);
+  push(MEM, GR, ac_pc);
   if ( data.usesMemory() ) ac_pc=MEM.read(data.address());
   else ac_pc=GR.read(data.reg2());
+  SPR.write(EIP,(int)ac_pc);
 }
 
 //!Instruction call_m16_32 behavior method
@@ -4299,7 +4388,7 @@ void ac_behavior( sub_rm32_imm32 )
 {
   // acprintf ( "SUB RM32, IMM32\t\t" );
   uint op1, op2, aux;
-  op1 = data.immediate();
+  op1 = data.immediate(SPR, ac_pc);
   if ( data.usesMemory() ) op2 = MEM.read(data.address());
   else op2 = GR.read(data.reg2());
   aux = op2 - op1;
@@ -4307,14 +4396,14 @@ void ac_behavior( sub_rm32_imm32 )
   else GR.write(data.reg2(),aux);
   if ( data.usesMemory() ) acprintfmi ( "SUB", data.address(), op1 );
   else acprintfri ( "SUB", data.reg2(), op1 );
-  checkFlags(OPER_SUB,op2,op1,aux,FLAG_ALL);
+  checkFlags(SPR, OPER_SUB,op2,op1,aux,FLAG_ALL);
 }
 
 //!Instruction sub_rm32_imm8 behavior method
 void ac_behavior( sub_rm32_imm8 )
 {
   // acprintf ( "SUB RM32, IMM8\t\t" );
-  signed char i = data.immediate8();
+  signed char i = data.immediate8(SPR, ac_pc);
   signed int j = i;
   uint op1, op2, aux;
   if ( data.usesMemory() ) acprintfmi ( "SUB", data.address(), j );
@@ -4325,7 +4414,7 @@ void ac_behavior( sub_rm32_imm8 )
   aux = op2 - op1;
   if ( data.usesMemory() ) MEM.write(data.address(),aux);
   else GR.write(data.reg2(),aux);
-  checkFlags(OPER_SUB,op2,op1,aux,FLAG_ALL);
+  checkFlags(SPR, OPER_SUB,op2,op1,aux,FLAG_ALL);
 }
 
 //!Instruction sbb_rm32_imm32 behavior method
@@ -4333,30 +4422,30 @@ void ac_behavior( sbb_rm32_imm32 )
 {
   acprintf ( " SBB RM32, IMM32\n" );
   uint op1, op2, aux;
-  op1 = data.immediate() + testFlag(FLAG_CF);
+  op1 = data.immediate(SPR, ac_pc) + testFlag(SPR, FLAG_CF);
   if ( data.usesMemory() ) op2 = MEM.read(data.address());
   else op2 = GR.read(data.reg2());
   aux = op2 - op1;
   if ( data.usesMemory() ) MEM.write(data.address(),aux);
   else GR.write(data.reg2(),aux);
-  checkFlags(OPER_SUB,op2,op1,aux,FLAG_ALL);
+  checkFlags(SPR, OPER_SUB,op2,op1,aux,FLAG_ALL);
 }
 
 //!Instruction sbb_rm32_imm8 behavior method
 void ac_behavior( sbb_rm32_imm8 )
 {
   acprintf ( " SBB RM32, IMM8\n" );
-  signed char i = data.immediate8();
+  signed char i = data.immediate8(SPR, ac_pc);
   signed int j = i;
   uint op1, op2, aux;
   op1 = (unsigned)j;
   if ( data.usesMemory() ) op2 = MEM.read(data.address());
   else op2 = GR.read(data.reg2());
-  op1+= testFlag(FLAG_CF);
+  op1+= testFlag(SPR, FLAG_CF);
   aux = op2 - op1;
   if ( data.usesMemory() ) MEM.write(data.address(),aux);
   else GR.write(data.reg2(),aux);
-  checkFlags(OPER_SUB,op2,op1,aux,FLAG_ALL);
+  checkFlags(SPR, OPER_SUB,op2,op1,aux,FLAG_ALL);
 }
 
 //!Instruction adc_rm32_imm32 behavior method
@@ -4364,27 +4453,27 @@ void ac_behavior( adc_rm32_imm32 )
 {
   acprintf ( " ADC RM32, IMM32\n" );
   uint op1, op2, aux;
-  op1 = data.immediate() + testFlag(FLAG_CF);
+  op1 = data.immediate(SPR, ac_pc) + testFlag(SPR, FLAG_CF);
   if ( data.usesMemory() ) op2 = MEM.read(data.address());
   else op2 = GR.read(data.reg2());
   aux = op1 + op2;
   if ( data.usesMemory() ) MEM.write(data.address(),aux);
   else GR.write(data.reg2(),aux);
-  checkFlags(OPER_ADD,op1,op2,aux,FLAG_ALL);
+  checkFlags(SPR, OPER_ADD,op1,op2,aux,FLAG_ALL);
 }
 
 	//!Instruction adc_rm32_imm8 behavior method
 	void ac_behavior( adc_rm32_imm8 )
 	{
 		acprintf ( "ADC RM32, IMM8\n" );
-		signed char i = data.immediate8();
+		signed char i = data.immediate8(SPR, ac_pc);
 		signed int aux = i;
 		uint op1, op2, res;
-		op1 = aux + testFlag(FLAG_CF);
-		op2 = dataManager.getMemOrReg2();
+		op1 = aux + testFlag(SPR, FLAG_CF);
+		op2 = dataManager.getMemOrReg2(MEM, GR);
 		res = op1 + op2;
-		dataManager.setMemOrReg2(res);
-		checkFlags(OPER_ADD,op1,op2,aux,FLAG_ALL);
+		dataManager.setMemOrReg2(MEM, GR, res);
+		checkFlags(SPR, OPER_ADD,op1,op2,aux,FLAG_ALL);
 	}
 
 //!Instruction cmp_rm32_imm32 behavior method
@@ -4392,22 +4481,22 @@ void ac_behavior( cmp_rm32_imm32 )
 {
   acprintf ( " CMP RM32, IMM32\n" );
   signed int op1, op2, aux;
-  op1 = data.immediate();
+  op1 = data.immediate(SPR, ac_pc);
   if ( data.usesMemory() ) op2 = MEM.read(data.address());
   else op2 = GR.read(data.reg2());
   aux = op1-op2;
-  checkFlags(OPER_SUB,op1,op2,aux,FLAG_ALL);
+  checkFlags(SPR, OPER_SUB,op1,op2,aux,FLAG_ALL);
 }
 
 //!Instruction cmp_rm32_imm8 behavior method
 void ac_behavior( cmp_rm32_imm8 )
 {
   acprintf ( "CMP RM32, IMM8\n" );
-  signed char i = data.immediate8();
-  signed int op1 = dataManager.getMemOrReg2();
+  signed char i = data.immediate8(SPR, ac_pc);
+  signed int op1 = dataManager.getMemOrReg2(MEM, GR);
   signed int op2 = i;
   signed int res = op1 - op2;
-  checkFlags(OPER_SUB,op1,op2,res,FLAG_ALL);
+  checkFlags(SPR, OPER_SUB,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction and_rm32_imm32 behavior method
@@ -4415,29 +4504,29 @@ void ac_behavior( and_rm32_imm32 )
 {
 	acprintf ( "AND RM32, IMM32\n" );
 	uint op1, op2, res;
-	op1 = dataManager.getImmediate();
-	op2 = dataManager.getMemOrReg2();
+	op1 = dataManager.getImmediate(SPR, ac_pc);
+	op2 = dataManager.getMemOrReg2(MEM, GR);
 	res = op1&op2;
-	dataManager.setMemOrReg2(res);
-	resetFlag(FLAG_CF);
-	resetFlag(FLAG_OF);
-	checkFlags(OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	resetFlag(SPR, FLAG_CF);
+	resetFlag(SPR, FLAG_OF);
+	checkFlags(SPR, OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF);
 }
 
 //!Instruction and_rm32_imm8 behavior method
 void ac_behavior( and_rm32_imm8 )
 {
 	acprintf ( "AND RM32, IMM8\n" );
-	signed char i = data.immediate8();
+	signed char i = data.immediate8(SPR, ac_pc);
 	signed int aux = i;
 	uint op1, op2, res;
 	op1 = aux;
-	op2 = dataManager.getMemOrReg2();
+	op2 = dataManager.getMemOrReg2(MEM, GR);
 	res = op1&op2;
-	dataManager.setMemOrReg2(res);
-	resetFlag(FLAG_CF);
-	resetFlag(FLAG_OF);
-	checkFlags(OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	resetFlag(SPR, FLAG_CF);
+	resetFlag(SPR, FLAG_OF);
+	checkFlags(SPR, OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF);
 }
 
 //!Instruction or_rm32_imm32 behavior method
@@ -4445,29 +4534,29 @@ void ac_behavior( or_rm32_imm32 )
 {
 	acprintf ( "OR RM32, IMM32\n" );
 	uint op1, op2, res;
-	op1 = dataManager.getImmediate();
-	op2 = dataManager.getMemOrReg2();
+	op1 = dataManager.getImmediate(SPR, ac_pc);
+	op2 = dataManager.getMemOrReg2(MEM, GR);
 	res = op1|op2;
-	dataManager.setMemOrReg2(res);
-	resetFlag(FLAG_CF);
-	resetFlag(FLAG_OF);
-	checkFlags(OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	resetFlag(SPR, FLAG_CF);
+	resetFlag(SPR, FLAG_OF);
+	checkFlags(SPR, OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF);
 }
 
 //!Instruction or_rm32_imm8 behavior method
 void ac_behavior( or_rm32_imm8 )
 {
 	acprintf ( "OR RM32, IMM8\n" );
-	signed char i = data.immediate8();
+	signed char i = data.immediate8(SPR, ac_pc);
 	signed int aux = i;
 	uint op1, op2, res;
 	op1 = aux;
-	op2 = dataManager.getMemOrReg2();
+	op2 = dataManager.getMemOrReg2(MEM, GR);
 	res = op1|op2;
-	dataManager.setMemOrReg2(res);
-	resetFlag(FLAG_CF);
-	resetFlag(FLAG_OF);
-	checkFlags(OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	resetFlag(SPR, FLAG_CF);
+	resetFlag(SPR, FLAG_OF);
+	checkFlags(SPR, OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF);
 }
 
 //!Instruction xor_rm32_imm32 behavior method
@@ -4475,29 +4564,29 @@ void ac_behavior( xor_rm32_imm32 )
 {
 	acprintf ( "XOR RM32, IMM32\n" );
 	uint op1, op2, res;
-	op1 = dataManager.getImmediate();
-	op2 = dataManager.getMemOrReg2();
+	op1 = dataManager.getImmediate(SPR, ac_pc);
+	op2 = dataManager.getMemOrReg2(MEM, GR);
 	res = op1^op2;
-	dataManager.setMemOrReg2(res);
-	resetFlag(FLAG_CF);
-	resetFlag(FLAG_OF);
-	checkFlags(OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	resetFlag(SPR, FLAG_CF);
+	resetFlag(SPR, FLAG_OF);
+	checkFlags(SPR, OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF);
 }
 
 //!Instruction xor_rm32_imm8 behavior method
 void ac_behavior( xor_rm32_imm8 )
 {
 	acprintf ( "XOR RM32, IMM8\n" );
-	signed char i = data.immediate8();
+	signed char i = data.immediate8(SPR, ac_pc);
 	signed int aux = i;
 	uint op1, op2, res;
 	op1 = aux;
-	op2 = dataManager.getMemOrReg2();
+	op2 = dataManager.getMemOrReg2(MEM, GR);
 	res = op1^op2;
-	dataManager.setMemOrReg2(res);
-	resetFlag(FLAG_CF);
-	resetFlag(FLAG_OF);
-	checkFlags(OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF);
+	dataManager.setMemOrReg2(MEM, GR, res);
+	resetFlag(SPR, FLAG_CF);
+	resetFlag(SPR, FLAG_OF);
+	checkFlags(SPR, OPER_NONE,op1,op2,res,FLAG_SF|FLAG_ZF|FLAG_PF);
 }
 
 //!Instruction div_rm32 behavior method
@@ -4506,18 +4595,18 @@ void ac_behavior( div_rm32 )
 	acprintf ( "DIV RM32\n" );
 	if ( OperandSize == OPERAND_SIZE16 )
 	{
-		unsigned int op1 = (readRegister(DX)<<16)|((readRegister(AX)&MASK_16BITS));
-		unsigned short op2 = dataManager.getMemOrReg2();
-		writeRegister(AX, op1/op2);
-		writeRegister(DX, op1%op2);
+		unsigned int op1 = (readRegister(GR, DX)<<16)|((readRegister(GR, AX)&MASK_16BITS));
+		unsigned short op2 = dataManager.getMemOrReg2(MEM, GR);
+		writeRegister(GR, AX, op1/op2);
+		writeRegister(GR, DX, op1%op2);
 	}
 	else if ( OperandSize == OPERAND_SIZE32 )
 	{
-		unsigned long long edx = readRegister(EDX);
-		unsigned long long op1 = (edx<<32)|(readRegister(EAX));
-		unsigned int op2 = dataManager.getMemOrReg2();
-		writeRegister(EAX, op1/op2);
-		writeRegister(EDX, op1%op2);
+		unsigned long long edx = readRegister(GR, EDX);
+		unsigned long long op1 = (edx<<32)|(readRegister(GR, EAX));
+		unsigned int op2 = dataManager.getMemOrReg2(MEM, GR);
+		writeRegister(GR, EAX, op1/op2);
+		writeRegister(GR, EDX, op1%op2);
 	}
 }
 
@@ -4527,18 +4616,18 @@ void ac_behavior( idiv_rm32 )
 	acprintf ( "IDIV RM32\n" );
 	if ( OperandSize == OPERAND_SIZE16 )
 	{
-		signed int op1 = (readRegister(DX)<<16)|((readRegister(AX)&MASK_16BITS));
-		signed short op2 = dataManager.getMemOrReg2();
-		writeRegister(AX, op1/op2);
-		writeRegister(DX, op1%op2);
+		signed int op1 = (readRegister(GR, DX)<<16)|((readRegister(GR, AX)&MASK_16BITS));
+		signed short op2 = dataManager.getMemOrReg2(MEM, GR);
+		writeRegister(GR, AX, op1/op2);
+		writeRegister(GR, DX, op1%op2);
 	}
 	else if ( OperandSize == OPERAND_SIZE32 )
 	{
-		signed long long edx = readRegister(EDX);
-		signed long long op1 = (edx<<32)|(readRegister(EAX));
-		signed int op2 = dataManager.getMemOrReg2();
-		writeRegister(EAX, op1/op2);
-		writeRegister(EDX, op1%op2);
+		signed long long edx = readRegister(GR, EDX);
+		signed long long op1 = (edx<<32)|(readRegister(GR, EAX));
+		signed int op2 = dataManager.getMemOrReg2(MEM, GR);
+		writeRegister(GR, EAX, op1/op2);
+		writeRegister(GR, EDX, op1%op2);
 	}
 }
 
@@ -4546,30 +4635,30 @@ void ac_behavior( idiv_rm32 )
 void ac_behavior( imul_rm32 )
 {
 	acprintf ( "IMUL RM32\n" );
-	signed int op1 = readRegister(EAX);
-	signed int op2 = dataManager.getMemOrReg2();
+	signed int op1 = readRegister(GR, EAX);
+	signed int op2 = dataManager.getMemOrReg2(MEM, GR);
 	signed long long lop1 = op1;
 	signed long long lop2 = op2;
 	signed long long res = lop1 * lop2;
 	if ( (res>0xFFFF&&(OperandSize==OPERAND_SIZE16))||(res>0xFFFFFFFF&&(OperandSize==OPERAND_SIZE32)) )
 	{
-		setFlag(FLAG_CF);
-		setFlag(FLAG_OF);
+		setFlag(SPR, FLAG_CF);
+		setFlag(SPR, FLAG_OF);
 	}
 	else
 	{
-		resetFlag(FLAG_CF);
-		resetFlag(FLAG_OF);
+		resetFlag(SPR, FLAG_CF);
+		resetFlag(SPR, FLAG_OF);
 	}
 	uint mask = 0xFFFFFFFF;
-	uint disp = 32;
+	uint disp_ = 32;
 	if ( OperandSize == OPERAND_SIZE16 )
 	{
 		mask = 0xFFFF;
-		disp = 16;
+		disp_ = 16;
 	}
-	writeRegister(EDX, res >> disp );
-	writeRegister(EAX, res & mask);
+	writeRegister(GR, EDX, res >> disp_ );
+	writeRegister(GR, EAX, res & mask);
 }
 
 //!Instruction neg_rm32 behavior method
@@ -4589,17 +4678,17 @@ void ac_behavior( neg_rm32 )
 		aux = (~op)+0x01;
 		GR.write(data.reg2(),aux);
 	}
-	if ( !op ) resetFlag(FLAG_CF);
-	else setFlag(FLAG_CF);
-	checkFlags(OPER_ADD,(~op),1,aux,FLAG_OF|FLAG_SF|FLAG_ZF|FLAG_AF|FLAG_PF);
+	if ( !op ) resetFlag(SPR, FLAG_CF);
+	else setFlag(SPR, FLAG_CF);
+	checkFlags(SPR, OPER_ADD,(~op),1,aux,FLAG_OF|FLAG_SF|FLAG_ZF|FLAG_AF|FLAG_PF);
 }
 
 //!Instruction not_rm32 behavior method
 void ac_behavior( not_rm32 )
 {
 	acprintf ( "NOT RM32\n" );
-	uint op = dataManager.getMemOrReg2();
-	dataManager.setMemOrReg2(~op);
+	uint op = dataManager.getMemOrReg2(MEM, GR);
+	dataManager.setMemOrReg2(MEM, GR, ~op);
 }
 
 //!Instruction test_rm32_imm32 behavior method
@@ -4609,11 +4698,11 @@ void ac_behavior( test_rm32_imm32 )
 	uint op1, op2, aux;
 	if ( data.usesMemory() ) op1 = MEM.read(data.address());
 	else op1 = GR.read(data.reg2());
-	op2 = data.immediate();
+	op2 = data.immediate(SPR, ac_pc);
 	aux = op1 & op2;
-	resetFlag(FLAG_OF);
-	resetFlag(FLAG_CF);
-	checkFlags(OPER_NONE,op1,op2,aux,FLAG_SF|FLAG_ZF|FLAG_PF);
+	resetFlag(SPR, FLAG_OF);
+	resetFlag(SPR, FLAG_CF);
+	checkFlags(SPR, OPER_NONE,op1,op2,aux,FLAG_SF|FLAG_ZF|FLAG_PF);
 }
 
 //!Instruction rcl_rm32 behavior method
@@ -4629,15 +4718,15 @@ void ac_behavior( rcl_rm32 )
         while ( tempCount != 0 )
         {
                 tempCF = (destination&(1<<31));
-                destination = (destination<<1) + testFlag(FLAG_CF);
-                if ( tempCF ) setFlag(FLAG_CF);
-                else resetFlag(FLAG_CF);
+                destination = (destination<<1) + testFlag(SPR, FLAG_CF);
+                if ( tempCF ) setFlag(SPR, FLAG_CF);
+                else resetFlag(SPR, FLAG_CF);
                 tempCount--;
         }
         if ( count==1 )
         {
-                if ((destination&(1<<31))^(testFlag(FLAG_CF))) setFlag(FLAG_OF);
-                else resetFlag(FLAG_OF);
+                if ((destination&(1<<31))^(testFlag(SPR, FLAG_CF))) setFlag(SPR, FLAG_OF);
+                else resetFlag(SPR, FLAG_OF);
         }
         if ( data.usesMemory() ) MEM.write(data.address(),destination);
         else GR.write(data.reg2(),destination);
@@ -4647,7 +4736,7 @@ void ac_behavior( rcl_rm32 )
 void ac_behavior( rcl_rm32_imm8 )
 {
 	acprintf ( " RCL RM32, IMM8\n" );
-	unsigned char count = data.immediate8();
+	unsigned char count = data.immediate8(SPR, ac_pc);
 	unsigned char tempCount = count & 0x1F;
 	uint destination;
 	bool tempCF;
@@ -4656,15 +4745,15 @@ void ac_behavior( rcl_rm32_imm8 )
 	while ( tempCount != 0 )
 	{
 		tempCF = (destination&(1<<31));
-		destination = (destination<<1) + testFlag(FLAG_CF);
-		if ( tempCF ) setFlag(FLAG_CF);
-		else resetFlag(FLAG_CF);
+		destination = (destination<<1) + testFlag(SPR, FLAG_CF);
+		if ( tempCF ) setFlag(SPR, FLAG_CF);
+		else resetFlag(SPR, FLAG_CF);
 		tempCount--;
 	}
 	if ( count==1 )
 	{
-		if ((destination&(1<<31))^(testFlag(FLAG_CF))) setFlag(FLAG_OF);
-		else resetFlag(FLAG_OF);
+		if ((destination&(1<<31))^(testFlag(SPR, FLAG_CF))) setFlag(SPR, FLAG_OF);
+		else resetFlag(SPR, FLAG_OF);
 	}
 	if ( data.usesMemory() ) MEM.write(data.address(),destination);
 	else GR.write(data.reg2(),destination);
@@ -4682,15 +4771,15 @@ void ac_behavior( rcr_rm32 )
         else destination = GR.read(data.reg2());
         if ( count == 1 )
         {
-                if ((destination&(1<<31))^(testFlag(FLAG_CF))) setFlag(FLAG_OF);
-                else resetFlag(FLAG_OF);
+                if ((destination&(1<<31))^(testFlag(SPR, FLAG_CF))) setFlag(SPR, FLAG_OF);
+                else resetFlag(SPR, FLAG_OF);
         }
         while ( tempCount != 0 )
         {
                 tempCF = (destination&0x01);
-                destination = (destination>>1)+(testFlag(FLAG_CF)*(1<<31));
-                if ( tempCF ) setFlag(FLAG_CF);
-                else resetFlag(FLAG_CF);
+                destination = (destination>>1)+(testFlag(SPR, FLAG_CF)*(1<<31));
+                if ( tempCF ) setFlag(SPR, FLAG_CF);
+                else resetFlag(SPR, FLAG_CF);
                 tempCount--;
         }
         if ( data.usesMemory() ) MEM.write(data.address(),destination);
@@ -4701,7 +4790,7 @@ void ac_behavior( rcr_rm32 )
 void ac_behavior( rcr_rm32_imm8 )
 {
 	acprintf ( " RCR RM32, IMM8\n" );
-	unsigned char count = data.immediate8();
+	unsigned char count = data.immediate8(SPR, ac_pc);
 	unsigned char tempCount = count & 0x1F;
 	uint destination;
 	bool tempCF;
@@ -4709,15 +4798,15 @@ void ac_behavior( rcr_rm32_imm8 )
 	else destination = GR.read(data.reg2());
 	if ( count == 1 )
 	{
-		if ((destination&(1<<31))^(testFlag(FLAG_CF))) setFlag(FLAG_OF);
-		else resetFlag(FLAG_OF);
+		if ((destination&(1<<31))^(testFlag(SPR, FLAG_CF))) setFlag(SPR, FLAG_OF);
+		else resetFlag(SPR, FLAG_OF);
 	}
 	while ( tempCount != 0 )
 	{
 		tempCF = (destination&0x01);
-		destination = (destination>>1)+(testFlag(FLAG_CF)*(1<<31));
-		if ( tempCF ) setFlag(FLAG_CF);
-		else resetFlag(FLAG_CF);
+		destination = (destination>>1)+(testFlag(SPR, FLAG_CF)*(1<<31));
+		if ( tempCF ) setFlag(SPR, FLAG_CF);
+		else resetFlag(SPR, FLAG_CF);
 		tempCount--;
 	}
 	if ( data.usesMemory() ) MEM.write(data.address(),destination);
@@ -4740,14 +4829,14 @@ void ac_behavior( rol_rm32 )
                 destination = (destination<<1) + tempCF;
                 tempCount--;
         }
-        if ( destination & 0x01 ) setFlag(FLAG_CF);
-        else resetFlag(FLAG_CF);
+        if ( destination & 0x01 ) setFlag(SPR, FLAG_CF);
+        else resetFlag(SPR, FLAG_CF);
 	if ( data.usesMemory() ) MEM.write(data.address(),destination);
 	else GR.write(data.reg2(),destination);
         if ( count == 1 )
         {
-                if ((destination&(1<<31))^(testFlag(FLAG_CF))) setFlag(FLAG_OF);
-                else resetFlag(FLAG_OF);
+                if ((destination&(1<<31))^(testFlag(SPR, FLAG_CF))) setFlag(SPR, FLAG_OF);
+                else resetFlag(SPR, FLAG_OF);
         }
 }
 
@@ -4755,7 +4844,7 @@ void ac_behavior( rol_rm32 )
 void ac_behavior( rol_rm32_imm8 )
 {
 	acprintf ( " ROL RM32, IMM8\n" );
-	unsigned char count = data.immediate8();
+	unsigned char count = data.immediate8(SPR, ac_pc);
 	unsigned char tempCount = count % 32;
 	bool tempCF;
 	uint destination;
@@ -4767,14 +4856,14 @@ void ac_behavior( rol_rm32_imm8 )
 		destination = (destination<<1) + tempCF;
 		tempCount--;
 	}
-	if ( destination & 0x01 ) setFlag(FLAG_CF);
-	else resetFlag(FLAG_CF);
+	if ( destination & 0x01 ) setFlag(SPR, FLAG_CF);
+	else resetFlag(SPR, FLAG_CF);
 	if ( data.usesMemory() ) MEM.write(data.address(),destination);
 	else GR.write(data.reg2(),destination);
 	if ( count == 1 )
 	{
-		if ((destination&(1<<31))^(testFlag(FLAG_CF))) setFlag(FLAG_OF);
-		else resetFlag(FLAG_OF);
+		if ((destination&(1<<31))^(testFlag(SPR, FLAG_CF))) setFlag(SPR, FLAG_OF);
+		else resetFlag(SPR, FLAG_OF);
 	}
 }
 
@@ -4796,12 +4885,12 @@ void ac_behavior( ror_rm32 )
         }
         if ( data.usesMemory() ) MEM.write(data.address(),destination);
         else GR.write(data.reg2(),destination);
-        if ( destination&(1<<31) ) setFlag(FLAG_CF);
-        else resetFlag(FLAG_CF);
+        if ( destination&(1<<31) ) setFlag(SPR, FLAG_CF);
+        else resetFlag(SPR, FLAG_CF);
         if ( count == 1 )
         {
-                if ((destination&(1<<31))^(destination&(1<<30))) setFlag(FLAG_OF);
-                else resetFlag(FLAG_OF);
+                if ((destination&(1<<31))^(destination&(1<<30))) setFlag(SPR, FLAG_OF);
+                else resetFlag(SPR, FLAG_OF);
         }
 }
 
@@ -4809,7 +4898,7 @@ void ac_behavior( ror_rm32 )
 void ac_behavior( ror_rm32_imm8 )
 {
 	acprintf ( " ROR RM32, IMM8\n" );
-	unsigned char count = (data.immediate8()&0x1F);
+	unsigned char count = (data.immediate8(SPR, ac_pc)&0x1F);
 	unsigned char tempCount = count % 32;
 	bool tempCF;
 	uint destination;
@@ -4823,12 +4912,12 @@ void ac_behavior( ror_rm32_imm8 )
 	}
 	if ( data.usesMemory() ) MEM.write(data.address(),destination);
 	else GR.write(data.reg2(),destination);
-	if ( destination&(1<<31) ) setFlag(FLAG_CF);
-	else resetFlag(FLAG_CF);
+	if ( destination&(1<<31) ) setFlag(SPR, FLAG_CF);
+	else resetFlag(SPR, FLAG_CF);
 	if ( count == 1 )
 	{
-		if ((destination&(1<<31))^(destination&(1<<30))) setFlag(FLAG_OF);
-		else resetFlag(FLAG_OF);
+		if ((destination&(1<<31))^(destination&(1<<30))) setFlag(SPR, FLAG_OF);
+		else resetFlag(SPR, FLAG_OF);
 	}
 }
 
@@ -4917,8 +5006,8 @@ void ac_behavior( P_ADSIZE )
 void ac_behavior( mov_rm8_imm8 )
 {
   acprintf ( "CALLED MOV RM8, IMM8\n" );
-  if ( data.usesMemory() ) MEM.write_byte(data.address(),data.immediate8());
-  else GR.write(data.reg2(),data.immediate8());
+  if ( data.usesMemory() ) MEM.write_byte(data.address(),data.immediate8(SPR, ac_pc));
+  else GR.write(data.reg2(),data.immediate8(SPR, ac_pc));
 }
 
 //!Instruction mov_r8_rm8 behavior method
@@ -4927,73 +5016,73 @@ void ac_behavior( mov_r8_rm8 )
   acprintf ( "CALLED MOV R8, RM8\n" );
   unsigned char op;
   if ( data.usesMemory() ) op = MEM.read_byte(data.address());
-  else op = readRegister8(data.reg2());
-  writeRegister8(data.reg1(),op);
+  else op = readRegister8(GR, data.reg2());
+  writeRegister8(GR, data.reg1(),op);
 }
 
 //!Instruction mov_rm8_r8 behavior method
 void ac_behavior( mov_rm8_r8 )
 {
   acprintf ( "CALLED MOV RM8, R8\n" );
-  unsigned char op = readRegister8(data.reg1());
+  unsigned char op = readRegister8(GR, data.reg1());
   if ( data.usesMemory() ) MEM.write_byte(data.address(),op);
-  else writeRegister8(data.reg2(),op);
+  else writeRegister8(GR, data.reg2(),op);
 }
 
 //!Instruction mov_AL_imm8 behavior method
 void ac_behavior( mov_AL_imm8 )
 {
   acprintf ( "CALLED MOV AL, IMM8\n" );
- writeRegister8(AL,data.immediate8());
+ writeRegister8(GR, AL,data.immediate8(SPR, ac_pc));
 }
 
 //!Instruction mov_CL_imm8 behavior method
 void ac_behavior( mov_CL_imm8 )
 {
   acprintf ( "CALLED MOV CL, IMM8\n" );
-  writeRegister8(CL,data.immediate8());
+  writeRegister8(GR, CL,data.immediate8(SPR, ac_pc));
 }
 
 //!Instruction mov_DL_imm8 behavior method
 void ac_behavior( mov_DL_imm8 )
 {
   acprintf ( "CALLED MOV DL, IMM8\n" );
-  writeRegister8(DL,data.immediate8());
+  writeRegister8(GR, DL,data.immediate8(SPR, ac_pc));
 }
 
 //!Instruction mov_BL_imm8 behavior method
 void ac_behavior( mov_BL_imm8 )
 {
   acprintf ( "CALLED MOV BL, IMM8\n" );
-  writeRegister8(BL,data.immediate8());
+  writeRegister8(GR, BL,data.immediate8(SPR, ac_pc));
 }
 
 //!Instruction mov_AH_imm8 behavior method
 void ac_behavior( mov_AH_imm8 )
 {
   acprintf ( "CALLED MOV AH, IMM8\n" );
-   writeRegister8(AH,data.immediate8());
+   writeRegister8(GR, AH,data.immediate8(SPR, ac_pc));
 }
 
 //!Instruction mov_CH_imm8 behavior method
 void ac_behavior( mov_CH_imm8 )
 {
   acprintf ( "CALLED MOV CH, IMM8\n" );
-  writeRegister8(CH,data.immediate8());
+  writeRegister8(GR, CH,data.immediate8(SPR, ac_pc));
 }
 
 //!Instruction mov_DH_imm8 behavior method
 void ac_behavior( mov_DH_imm8 )
 {
   acprintf ( "CALLED MOV DH, IMM8\n" );
-  writeRegister8(DH,data.immediate8());
+  writeRegister8(GR, DH,data.immediate8(SPR, ac_pc));
 }
 
 //!Instruction mov_BH_imm8 behavior method
 void ac_behavior( mov_BH_imm8 )
 {
 	acprintf ( "CALLED MOV BH, IMM8\n" );
-	writeRegister8(BH,data.immediate8());
+	writeRegister8(GR, BH,data.immediate8(SPR, ac_pc));
 }
 
 //!Instruction add_r8_rm8 behavior method
@@ -5002,11 +5091,11 @@ void ac_behavior( add_r8_rm8 )
 	acprintf ( "CALLED ADD R8, RM8\n" );
 	unsigned char op1;
 	if ( data.usesMemory() ) op1 = MEM.read_byte(data.address());
-	else op1 = readRegister8(data.reg2());
-	unsigned char op2 = readRegister8(data.reg1());
+	else op1 = readRegister8(GR, data.reg2());
+	unsigned char op2 = readRegister8(GR, data.reg1());
 	unsigned char res = op1 + op2;
-	writeRegister8(data.reg1(),res);
-	checkFlags8(OPER_ADD,op1,op2,res,FLAG_ALL);
+	writeRegister8(GR, data.reg1(),res);
+	checkFlags8(SPR, OPER_ADD,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction add_rm8_r8 behavior method
@@ -5015,12 +5104,12 @@ void ac_behavior( add_rm8_r8 )
 	acprintf ( "CALLED ADD RM8, R8\n" );
 	unsigned char op1;
 	if ( data.usesMemory() ) op1 = MEM.read_byte(data.address());
-	else op1 = readRegister8(data.reg2());
-	unsigned char op2 = readRegister8(data.reg1());
+	else op1 = readRegister8(GR, data.reg2());
+	unsigned char op2 = readRegister8(GR, data.reg1());
 	unsigned char res = op1 + op2;
 	if ( data.usesMemory() ) MEM.write_byte(data.address(), res );
-	else writeRegister8(data.reg2(),res);
-	checkFlags8(OPER_ADD,op1,op2,res,FLAG_ALL);
+	else writeRegister8(GR, data.reg2(),res);
+	checkFlags8(SPR, OPER_ADD,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction add_rm8_imm8 behavior method
@@ -5029,12 +5118,12 @@ void ac_behavior( add_rm8_imm8 )
 	acprintf ( "CALLED ADD RM8, IMM8\n" );
 	unsigned char op1;
 	if ( data.usesMemory() ) op1 = MEM.read_byte(data.address());
-	else op1 = readRegister8(data.reg2());
-	unsigned char op2 = data.immediate8();
+	else op1 = readRegister8(GR, data.reg2());
+	unsigned char op2 = data.immediate8(SPR, ac_pc);
 	unsigned char res = op1 + op2;
 	if ( data.usesMemory() ) MEM.write_byte(data.address(), res);
-        else writeRegister8(data.reg2(), res);
-	checkFlags8(OPER_ADD,op1,op2,res,FLAG_ALL);
+        else writeRegister8(GR, data.reg2(), res);
+	checkFlags8(SPR, OPER_ADD,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction sub_rm8_r8 behavior method
@@ -5043,12 +5132,12 @@ void ac_behavior( sub_rm8_r8 )
 	acprintf ( "CALLED SUB RM8, R8\n" );
 	unsigned char op1, op2, res;
 	if ( data.usesMemory() ) op1 = MEM.read_byte(data.address());
-	else op1 = readRegister8(data.reg2());
-	op2 = readRegister8(data.reg1());
+	else op1 = readRegister8(GR, data.reg2());
+	op2 = readRegister8(GR, data.reg1());
 	res = op1 - op2;
 	if ( data.usesMemory() ) MEM.write_byte(data.address(),res);
-	else writeRegister8(data.reg2(),res);
-	checkFlags8(OPER_SUB,op1,op2,res,FLAG_ALL);
+	else writeRegister8(GR, data.reg2(),res);
+	checkFlags8(SPR, OPER_SUB,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction sub_rm8_imm8 behavior method
@@ -5057,12 +5146,12 @@ void ac_behavior( sub_rm8_imm8 )
 	acprintf ( "CALLED SUB RM8, IMM8\n" );
 	unsigned char op1;
 	if ( data.usesMemory() ) op1 = MEM.read_byte(data.address());
-	else op1 = readRegister8(data.reg2());
-	unsigned char op2 = data.immediate8();
+	else op1 = readRegister8(GR, data.reg2());
+	unsigned char op2 = data.immediate8(SPR, ac_pc);
 	unsigned char res = op1 - op2;
 	if ( data.usesMemory() ) MEM.write_byte(data.address(), res);
-	else writeRegister8(data.reg2(), res);
-	checkFlags8(OPER_SUB,op1,op2,res,FLAG_ALL);
+	else writeRegister8(GR, data.reg2(), res);
+	checkFlags8(SPR, OPER_SUB,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction inc_rm8 behavior method
@@ -5071,12 +5160,12 @@ void ac_behavior( inc_rm8 )
   acprintf ( "CALLED INC RM8\n" );
   unsigned char op1;
   if ( data.usesMemory() ) op1 = MEM.read_byte(data.address());
-  else op1 = readRegister8(data.reg2());
+  else op1 = readRegister8(GR, data.reg2());
   unsigned char op2 = 1;
   unsigned char res = op1 + op2;
   if ( data.usesMemory() ) MEM.write_byte(data.address(),res);
-  else writeRegister8(data.reg2(),res);
-  checkFlags8(OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+  else writeRegister8(GR, data.reg2(),res);
+  checkFlags8(SPR, OPER_ADD,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 //!Instruction dec_rm8 behavior method
@@ -5085,80 +5174,80 @@ void ac_behavior( dec_rm8 )
 	acprintf ( "CALLED DEC RM8\n" );
 	unsigned char op1;
 	if ( data.usesMemory() ) op1 = MEM.read_byte(data.address());
-	else op1 = readRegister8(data.reg2());
+	else op1 = readRegister8(GR, data.reg2());
 	unsigned char op2 = 1;
 	unsigned char res = op1 - op2;
 	if ( data.usesMemory() ) MEM.write_byte(data.address(), res);
-	else writeRegister8(data.reg2(), res);
-	checkFlags8(OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
+	else writeRegister8(GR, data.reg2(), res);
+	checkFlags8(SPR, OPER_SUB,op1,op2,res,FLAG_ALL&(~FLAG_CF));
 }
 
 //!Instruction imul_rm8 behavior method
 void ac_behavior( imul_rm8 )
 {
 	printf ( "IMUL RM8\n" );
-	signed char op1 = readRegister8(AL);
+	signed char op1 = readRegister8(GR, AL);
 	signed char op2;
 	signed short res;
 	if ( data.usesMemory() ) op2 = MEM.read_byte(data.address());
-	else op2 = readRegister8(data.reg2());
+	else op2 = readRegister8(GR, data.reg2());
 	res = op1 * op2;
 	if ( res & 0xFF00 )
 	{
-		setFlag(FLAG_CF);
-		setFlag(FLAG_OF);
+		setFlag(SPR, FLAG_CF);
+		setFlag(SPR, FLAG_OF);
 	}
 	else
 	{
-		resetFlag(FLAG_CF);
-		resetFlag(FLAG_OF);
+		resetFlag(SPR, FLAG_CF);
+		resetFlag(SPR, FLAG_OF);
 	}
 	OperandSize = OPERAND_SIZE16;
-	writeRegister(AX, res);
+	writeRegister(GR, AX, res);
 }
 
 //!Instruction imul_r32_rm32 behavior method
 void ac_behavior( imul_r32_rm32 )
 {
 	printf ( "IMUL R32, RM32\n" );
-	signed int op1 = dataManager.getReg1();
-	signed int op2 = dataManager.getMemOrReg2();
+	signed int op1 = dataManager.getReg1(GR);
+	signed int op2 = dataManager.getMemOrReg2(MEM, GR);
 	signed long long res = op1 * op2;
 	if ( res > 0xFFFFFFFF )
 	{
-		setFlag(FLAG_CF);
-		setFlag(FLAG_OF);
+		setFlag(SPR, FLAG_CF);
+		setFlag(SPR, FLAG_OF);
 	}
 	else
 	{
-		resetFlag(FLAG_CF);
-		resetFlag(FLAG_OF);
+		resetFlag(SPR, FLAG_CF);
+		resetFlag(SPR, FLAG_OF);
 	}
-	dataManager.setReg1(res);
+	dataManager.setReg1(GR, res);
 }
 
 //!Instruction mul_rm8 behavior method
 void ac_behavior( mul_rm8 )
 {
 	printf ( "MUL RM8\n" );
-	unsigned char op1 = readRegister8(AL);
+	unsigned char op1 = readRegister8(GR, AL);
 	unsigned char op2;
 	unsigned short res;
 	if ( data.usesMemory() ) op2 = MEM.read_byte(data.address());
-	else op2 = readRegister8(data.reg2());
+	else op2 = readRegister8(GR, data.reg2());
 	res = op1 * op2;
 	if ( res & 0xFF00 )
 	{
-		setFlag(FLAG_CF);
-		setFlag(FLAG_OF);
+		setFlag(SPR, FLAG_CF);
+		setFlag(SPR, FLAG_OF);
 	}
 	else
 	{
-		resetFlag(FLAG_CF);
-		resetFlag(FLAG_OF);
+		resetFlag(SPR, FLAG_CF);
+		resetFlag(SPR, FLAG_OF);
 	}
 	OperandSize = OPERAND_SIZE16;
-	writeRegister(AX, res);
+	writeRegister(GR, AX, res);
 }
 
 //!Instruction sal_rm8 behavior method
@@ -5167,14 +5256,14 @@ void ac_behavior( sal_rm8 )
 	printf ( "SAL RM8\n" );
 	unsigned char op, res;
 	if ( data.usesMemory() ) op = MEM.read_byte(data.address());
-	else op = readRegister8(data.reg2());
+	else op = readRegister8(GR, data.reg2());
 	res = op << 1;
 	if ( data.usesMemory() ) MEM.write_byte(data.address(),res);
-	else writeRegister8(data.reg2(),res);
-	checkFlags8(OPER_NONE,0,0,res,FLAG_ALL);
-	writeFlag(FLAG_CF, op&0x80);
-	bool ofcond = (!MSB8(res)&&testFlag(FLAG_CF))||(MSB8(res)&&!testFlag(FLAG_CF));
-	writeFlag(FLAG_OF, ofcond);
+	else writeRegister8(GR, data.reg2(),res);
+	checkFlags8(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+	writeFlag(SPR, FLAG_CF, op&0x80);
+	bool ofcond = (!MSB8(res)&&testFlag(SPR, FLAG_CF))||(MSB8(res)&&!testFlag(SPR, FLAG_CF));
+	writeFlag(SPR, FLAG_OF, ofcond);
 }
 
 //!Instruction sal_rm8_imm8 behavior method
@@ -5182,16 +5271,16 @@ void ac_behavior( sal_rm8_imm8 )
 {
 	printf ( "SAL RM8, IMM8\n" );
 	unsigned char op, res;
-	signed char count = data.immediate8();
+	signed char count = data.immediate8(SPR, ac_pc);
 	if ( data.usesMemory() ) op = MEM.read_byte(data.address());
-	else op = readRegister8(data.reg2());
+	else op = readRegister8(GR, data.reg2());
 	res = op << count;
 	if ( data.usesMemory() ) MEM.write_byte(data.address(),res);
-	else writeRegister(data.reg2(),res);
-	checkFlags8(OPER_NONE,0,0,res,FLAG_ALL);
-	if ( count > 0 ) writeFlag(FLAG_CF, (op<<(count-1))&0x80);
-	bool ofcond = (!MSB8(res)&&testFlag(FLAG_CF))||(MSB8(res)&&!testFlag(FLAG_CF));
-	if ( count == 1 ) writeFlag(FLAG_OF, ofcond);
+	else writeRegister(GR, data.reg2(),res);
+	checkFlags8(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+	if ( count > 0 ) writeFlag(SPR, FLAG_CF, (op<<(count-1))&0x80);
+	bool ofcond = (!MSB8(res)&&testFlag(SPR, FLAG_CF))||(MSB8(res)&&!testFlag(SPR, FLAG_CF));
+	if ( count == 1 ) writeFlag(SPR, FLAG_OF, ofcond);
 }
 
 //!Instruction shr_rm8 behavior method
@@ -5200,13 +5289,13 @@ void ac_behavior( shr_rm8 )
 	printf ( "SHR RM8\n" );
 	unsigned char op, res;
 	if ( data.usesMemory() ) op = MEM.read_byte(data.address());
-	else op = readRegister8(data.reg2());
+	else op = readRegister8(GR, data.reg2());
 	res = op >> 1;
 	if ( data.usesMemory() ) MEM.write_byte(data.address(),res);
-	else writeRegister8(data.reg2(),res);
-	checkFlags8(OPER_NONE,0,0,res,FLAG_ALL);
-	writeFlag(FLAG_CF, op&0x01);
-	writeFlag(FLAG_OF, op&0x80);
+	else writeRegister8(GR, data.reg2(),res);
+	checkFlags8(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+	writeFlag(SPR, FLAG_CF, op&0x01);
+	writeFlag(SPR, FLAG_OF, op&0x80);
 }
 
 //!Instruction sar_rm8 behavior method
@@ -5215,13 +5304,13 @@ void ac_behavior( sar_rm8 )
 	printf ( "SAR RM8\n" );
 	signed char op, res;
 	if ( data.usesMemory() ) op = MEM.read_byte(data.address());
-	else op = readRegister8(data.reg2());
+	else op = readRegister8(GR, data.reg2());
 	res = op>>1;
 	if ( data.usesMemory() ) MEM.write_byte(data.address(),res);
-	else writeRegister8(data.reg2(),res);
-	checkFlags8(OPER_NONE,0,0,res,FLAG_ALL);
-	writeFlag(FLAG_CF, op&0x01);
-	resetFlag(FLAG_OF);
+	else writeRegister8(GR, data.reg2(),res);
+	checkFlags8(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+	writeFlag(SPR, FLAG_CF, op&0x01);
+	resetFlag(SPR, FLAG_OF);
 }
 
 //!Instruction sar_rm8_imm8 behavior method
@@ -5231,14 +5320,14 @@ void ac_behavior( sar_rm8_imm8 )
 	signed char count;
 	signed char op, res;
 	if ( data.usesMemory() ) op = MEM.read_byte(data.address());
-	else op = readRegister8(data.reg2());
-	count = data.immediate8();
+	else op = readRegister8(GR, data.reg2());
+	count = data.immediate8(SPR, ac_pc);
 	res = op >> count;
 	if ( data.usesMemory() ) MEM.write_byte(data.address(),res);
-	else writeRegister8(data.reg2(),res);
-	checkFlags8(OPER_NONE,0,0,res,FLAG_ALL);
-	if ( count > 0 ) writeFlag(FLAG_CF, (op>>(count-1))&0x01);
-	if ( count == 1 ) resetFlag(FLAG_OF);
+	else writeRegister8(GR, data.reg2(),res);
+	checkFlags8(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+	if ( count > 0 ) writeFlag(SPR, FLAG_CF, (op>>(count-1))&0x01);
+	if ( count == 1 ) resetFlag(SPR, FLAG_OF);
 }
 
 //!Instruction cmp_rm8_imm8 behavior method
@@ -5248,10 +5337,10 @@ void ac_behavior( cmp_rm8_imm8 )
 	unsigned char op1, res;
 	signed char op2;
 	if ( data.usesMemory() ) op1 = MEM.read_byte(data.address());
-	else op1 = readRegister8(data.reg2());
-	op2 = data.immediate8();
+	else op1 = readRegister8(GR, data.reg2());
+	op2 = data.immediate8(SPR, ac_pc);
 	res = op1 - op2;
-	checkFlags8(OPER_SUB,op1,op2,res,FLAG_ALL);
+	checkFlags8(SPR, OPER_SUB,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction cmp_AL_imm8 behavior method
@@ -5260,10 +5349,10 @@ void ac_behavior( cmp_AL_imm8 )
 	printf ( "CMP AL, IMM8\n" );
 	unsigned char op1, res;
 	signed char op2;
-	op1 = readRegister8(AL);
-	op2 = data.immediate8();
+	op1 = readRegister8(GR, AL);
+	op2 = data.immediate8(SPR, ac_pc);
 	res = op1 - op2;
-	checkFlags8(OPER_SUB,op1,op2,res,FLAG_ALL);
+	checkFlags8(SPR, OPER_SUB,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction shr_rm8_imm8 behavior method
@@ -5273,14 +5362,14 @@ void ac_behavior( shr_rm8_imm8 )
 	signed char count;
 	unsigned char op, res;
 	if ( data.usesMemory() ) op = MEM.read_byte(data.address());
-	else op = readRegister8(data.reg2());
-	count = data.immediate8();
+	else op = readRegister8(GR, data.reg2());
+	count = data.immediate8(SPR, ac_pc);
 	res = op >> count;
 	if ( data.usesMemory() ) MEM.write_byte(data.address(),res);
-	else writeRegister8(data.reg2(),res);
-	checkFlags8(OPER_NONE,0,0,res,FLAG_ALL);
-	if ( count == 1 ) writeFlag(FLAG_OF, op&0x80);
-	if ( count > 0 ) writeFlag(FLAG_CF, (op>>(count-1))&0x01);
+	else writeRegister8(GR, data.reg2(),res);
+	checkFlags8(SPR, OPER_NONE,0,0,res,FLAG_ALL);
+	if ( count == 1 ) writeFlag(SPR, FLAG_OF, op&0x80);
+	if ( count > 0 ) writeFlag(SPR, FLAG_CF, (op>>(count-1))&0x01);
 }
 
 //!Instruction div_rm8 behavior method
@@ -5288,58 +5377,58 @@ void ac_behavior( div_rm8 )
 {
 	printf ( "DIV RM8\n" );
 	OperandSize = OPERAND_SIZE16;
-	unsigned short op1 = readRegister(AX);
+	unsigned short op1 = readRegister(GR, AX);
 	OperandSize = OPERAND_SIZE32;
 	unsigned char op2;
 	if ( data.usesMemory() ) op2 = MEM.read_byte(data.address());
-	else op2 = readRegister8(data.reg2());
-	writeRegister8(AH, op1/op2);
-	writeRegister8(AL, op1%op2);
+	else op2 = readRegister8(GR, data.reg2());
+	writeRegister8(GR, AL, op1/op2);
+	writeRegister8(GR, AH, op1%op2);
 }
 
 //!Instruction or_r8_rm8 behavior method
 void ac_behavior( or_r8_rm8 )
 {
 	printf ( "OR R8, RM8\n" );
-	unsigned char op1 = readRegister8(data.reg1());
+	unsigned char op1 = readRegister8(GR, data.reg1());
 	unsigned char op2, res;
 	if ( data.usesMemory() ) op2 = MEM.read_byte(data.address());
-	else op2 = readRegister8(data.reg2());
+	else op2 = readRegister8(GR, data.reg2());
 	res = op1|op2;
-	writeRegister8(data.reg1(),res);
-	checkFlags8(OPER_NONE,op1,op2,res,FLAG_ALL);
-	resetFlag(FLAG_OF);
-	resetFlag(FLAG_CF);
+	writeRegister8(GR, data.reg1(),res);
+	checkFlags8(SPR, OPER_NONE,op1,op2,res,FLAG_ALL);
+	resetFlag(SPR, FLAG_OF);
+	resetFlag(SPR, FLAG_CF);
 }
 
 //!Instruction and_r8_rm8 behavior method
 void ac_behavior( and_r8_rm8 )
 {
 	printf ( "AND R8, RM8\n" );
-	unsigned char op1 = readRegister8(data.reg1());
+	unsigned char op1 = readRegister8(GR, data.reg1());
 	unsigned char op2, res;
 	if ( data.usesMemory() ) op2 = MEM.read_byte(data.address());
-	else op2 = readRegister8(data.reg2());
+	else op2 = readRegister8(GR, data.reg2());
 	res = op1&op2;
-	writeRegister8(data.reg1(),res);
-	checkFlags8(OPER_NONE,op1,op2,res,FLAG_ALL);
-	resetFlag(FLAG_OF);
-	resetFlag(FLAG_CF);
+	writeRegister8(GR, data.reg1(),res);
+	checkFlags8(SPR, OPER_NONE,op1,op2,res,FLAG_ALL);
+	resetFlag(SPR, FLAG_OF);
+	resetFlag(SPR, FLAG_CF);
 }
 
 //!Instruction xor_r8_rm8 behavior method
 void ac_behavior( xor_r8_rm8 )
 {
 	printf ( "XOR R8, RM8\n" );
-	unsigned char op1 = readRegister8(data.reg1());
+	unsigned char op1 = readRegister8(GR, data.reg1());
 	unsigned char op2, res;
 	if ( data.usesMemory() ) op2 = MEM.read_byte(data.address());
-	else op2 = readRegister8(data.reg2());
+	else op2 = readRegister8(GR, data.reg2());
 	res = op1^op2;
-	writeRegister8(data.reg1(),res);
-	checkFlags8(OPER_NONE,op1,op2,res,FLAG_ALL);
-	resetFlag(FLAG_OF);
-	resetFlag(FLAG_CF);
+	writeRegister8(GR, data.reg1(),res);
+	checkFlags8(SPR, OPER_NONE,op1,op2,res,FLAG_ALL);
+	resetFlag(SPR, FLAG_OF);
+	resetFlag(SPR, FLAG_CF);
 }
 
 //!Instruction cmp_r8_rm8 behavior method.
@@ -5347,20 +5436,20 @@ void ac_behavior( cmp_r8_rm8 )
 {
 	printf ( "CMP R8, RM8\n" );
 	unsigned char op1, op2, res;
-	op1 = readRegister8(data.reg1());
+	op1 = readRegister8(GR, data.reg1());
 	if ( data.usesMemory() ) op2 = MEM.read_byte(data.address());
-	else op2 = readRegister8(data.reg2());
+	else op2 = readRegister8(GR, data.reg2());
 	res = op1 - op2;
-	checkFlags8(OPER_SUB,op1,op2,res,FLAG_ALL);
+	checkFlags8(SPR, OPER_SUB,op1,op2,res,FLAG_ALL);
 }
 
 //!Instruction push_imm8 behavior method.
 void ac_behavior( push_imm8 )
 {
 	printf ( "PUSH IMM8\n" );
-	signed char i = data.immediate8();
+	signed char i = data.immediate8(SPR, ac_pc);
 	signed int aux = i;
-	push(aux);
+	push(MEM, GR, aux);
 }
 
 //!Instruction dump_registers behavior method.
@@ -5378,12 +5467,12 @@ void ac_behavior( dump_registers )
 	printf ( "ES = %04X\tFS = %04X\tGS = %04X\n", SR.read(ES), SR.read(FS), SR.read(GS) );
 	printf ( "- Flags ------------------------------------------------------\n" );
 	printf ( "EFLAGS = %08X\n", SPR.read(EFLAGS) );
-	printf ( "OF FLAG = %d\n", testFlag(FLAG_OF) );
-	printf ( "SF FLAG = %d\n", testFlag(FLAG_SF) );
-	printf ( "ZF FLAG = %d\n", testFlag(FLAG_ZF) );
-	printf ( "AF FLAG = %d\n", testFlag(FLAG_AF) );
-	printf ( "CF FLAG = %d\n", testFlag(FLAG_CF) );
-	printf ( "PF FLAG = %d\n", testFlag(FLAG_PF) );
+	printf ( "OF FLAG = %d\n", testFlag(SPR, FLAG_OF) );
+	printf ( "SF FLAG = %d\n", testFlag(SPR, FLAG_SF) );
+	printf ( "ZF FLAG = %d\n", testFlag(SPR, FLAG_ZF) );
+	printf ( "AF FLAG = %d\n", testFlag(SPR, FLAG_AF) );
+	printf ( "CF FLAG = %d\n", testFlag(SPR, FLAG_CF) );
+	printf ( "PF FLAG = %d\n", testFlag(SPR, FLAG_PF) );
 	printf ( "- Program counter --------------------------------------------\n" );
 	printf ( "EIP = %08X\n", SPR.read(EIP) );
 	printf ( "------------------ Register dumping end ----------------------\n\n" );
@@ -5457,22 +5546,22 @@ void ac_behavior( aaa ){
   acprintf( "AAA - not tested\n" );
   
   aux = GR[AL];
-  if ( ( (aux & 0x0F) > 9 ) or ( testFlag(FLAG_AF) ) ){ 
+  if ( ( (aux & 0x0F) > 9 ) or ( testFlag(SPR, FLAG_AF) ) ){ 
     aux+=6;
     GR[AL] = aux;
     //    aux = GR[AH];
-    aux = readRegister8(AH);
+    aux = readRegister8(GR, AH);
     aux+=1;
-    writeRegister8(AH,aux); 
-    writeFlag( FLAG_AF, 1);
-    writeFlag( FLAG_CF, 1);
+    writeRegister8(GR, AH,aux); 
+    writeFlag(SPR,  FLAG_AF, 1);
+    writeFlag(SPR,  FLAG_CF, 1);
     aux = GR[AL];
     aux = ( aux & 0x0F );
     GR[AL] = aux;
   }//if
   else{
-    resetFlag(FLAG_AF);
-    resetFlag(FLAG_CF);
+    resetFlag(SPR, FLAG_AF);
+    resetFlag(SPR, FLAG_CF);
     aux = GR[AL];
     aux = ( aux & 0x0F );
     GR[AL] = aux;
@@ -5498,13 +5587,13 @@ void ac_behavior( aad ){
   acprintf ( " AAD - not tested\n" );
   tempAL = GR[AL];
   //tempAH = GR[AH];
-  tempAH = readRegister8(AH);
+  tempAH = readRegister8(GR, AH);
   GR[AL] =  (( tempAL + ( tempAH*0x0A)  )  & 0xFF);
-  writeRegister8(AH,0);
+  writeRegister8(GR, AH,0);
   //GR[AH] = 0;
-  setFlags_af( FLAG_SF, GR[AL] );
-  setFlags_af( FLAG_ZF, GR[AL] );
-  setFlags_af( FLAG_PF, GR[AL] );
+  setFlags_af(SPR,  FLAG_SF, GR[AL] );
+  setFlags_af(SPR,  FLAG_ZF, GR[AL] );
+  setFlags_af(SPR,  FLAG_PF, GR[AL] );
 }//ac_behavior( aad )
 
 
@@ -5524,11 +5613,11 @@ void ac_behavior( aam ){
   acprintf ( " AAM - not tested\n" );
   tempAL = GR[AL];
   //GR[AH] = ( tempAL / 0x0A );
-  writeRegister8(AH, ( tempAL / 0x0A));
+  writeRegister8(GR, AH, ( tempAL / 0x0A));
   GR[AL] = ( tempAL % 0x0A );
-  setFlags_af( FLAG_SF,GR[AL] );
-  setFlags_af( FLAG_ZF,GR[AL] );
-  setFlags_af( FLAG_PF,GR[AL] );
+  setFlags_af(SPR,  FLAG_SF,GR[AL] );
+  setFlags_af(SPR,  FLAG_ZF,GR[AL] );
+  setFlags_af(SPR,  FLAG_PF,GR[AL] );
 } //ac_behavior( aam )
 
 //!Instruction aas description
@@ -5547,22 +5636,22 @@ register is unchanged. In either case, the AL register is left with its top nibb
 void ac_behavior( aas ){
   uint aux;
   acprintf ( " AAS <Not tested>\n" );
-  if ( ((GR[AL] & 0x0F) > 9) || ( testFlag( FLAG_AF )) ){
+  if ( ((GR[AL] & 0x0F) > 9) || ( testFlag(SPR,  FLAG_AF )) ){
     aux = GR[AL];
     aux = aux - 6;
     aux = (aux & 0x0F);
     GR[AL] = aux;
-    aux = readRegister8(AH);
+    aux = readRegister8(GR, AH);
     //aux = GR[AH];
     aux = aux - 1;
     //    GR[AH] = aux;
-    writeRegister8(AH,aux);
-    setFlag( FLAG_AF );
-    setFlag( FLAG_CF );
+    writeRegister8(GR, AH,aux);
+    setFlag(SPR,  FLAG_AF );
+    setFlag(SPR,  FLAG_CF );
   }//if
   else{
-    resetFlag( FLAG_CF );
-    resetFlag( FLAG_AF );
+    resetFlag(SPR,  FLAG_CF );
+    resetFlag(SPR,  FLAG_AF );
     aux = GR[AL];
     aux = ( aux & 0x0F );
   }//else
@@ -5625,22 +5714,22 @@ void ac_behavior( daa ){
   old_AL = GR[AL];
   old_FLAG_CF = SPR[FLAG_CF];
  
-  if( ((GR[AL] & 0x0F) > 9) || (testFlag(FLAG_AF)) ){
+  if( ((GR[AL] & 0x0F) > 9) || (testFlag(SPR, FLAG_AF)) ){
     tempAL = GR[AL];
     op1 = tempAL;
     tempAL += 6;
     res = tempAL;
     GR[AL] = tempAL;  
-    writeFlag(FLAG_CF,( old_FLAG_CF ||( ( (unsigned int)tempAL) > 0xFF    )));
-    setFlag(FLAG_AF);
+    writeFlag(SPR, FLAG_CF,( old_FLAG_CF ||( ( (unsigned int)tempAL) > 0xFF    )));
+    setFlag(SPR, FLAG_AF);
 
-    checkFlags8(OPER_ADD, op1,6,res,FLAG_SF );
-    checkFlags8(OPER_ADD, op1,6,res,FLAG_ZF );
-    checkFlags8(OPER_ADD, op1,6,res,FLAG_PF );
+    checkFlags8(SPR, OPER_ADD, op1,6,res,FLAG_SF );
+    checkFlags8(SPR, OPER_ADD, op1,6,res,FLAG_ZF );
+    checkFlags8(SPR, OPER_ADD, op1,6,res,FLAG_PF );
 
   }//if
   else
-    resetFlag(FLAG_AF);
+    resetFlag(SPR, FLAG_AF);
 
   if ((old_AL > 0x99) || (old_FLAG_CF == 1)){
     tempAL = GR[AL];
@@ -5648,14 +5737,14 @@ void ac_behavior( daa ){
     tempAL += 0x60;
     res = tempAL;
     GR[AL] = tempAL;
-    setFlag(FLAG_CF);
+    setFlag(SPR, FLAG_CF);
 
-    checkFlags8(OPER_ADD, op1,0x60,res,FLAG_SF );
-    checkFlags8(OPER_ADD, op1,0x60,res,FLAG_ZF );
-    checkFlags8(OPER_ADD, op1,0x60,res,FLAG_PF );
+    checkFlags8(SPR, OPER_ADD, op1,0x60,res,FLAG_SF );
+    checkFlags8(SPR, OPER_ADD, op1,0x60,res,FLAG_ZF );
+    checkFlags8(SPR, OPER_ADD, op1,0x60,res,FLAG_PF );
   }//if
   else
-    resetFlag(FLAG_CF);
+    resetFlag(SPR, FLAG_CF);
   
   
 }//ac_behavior( daa )
@@ -5683,22 +5772,22 @@ void ac_behavior( das ){
   old_AL = GR[AL];
   old_FLAG_CF = SPR[FLAG_CF];
  
-  if( ((GR[AL] & 0x0F) > 9) || (testFlag(FLAG_AF)) ){
+  if( ((GR[AL] & 0x0F) > 9) || (testFlag(SPR, FLAG_AF)) ){
     tempAL = GR[AL];
     op1 = tempAL;
     tempAL = tempAL - 6;
     res = tempAL;
     GR[AL] = tempAL;  
-    writeFlag(FLAG_CF,( old_FLAG_CF || ( checkCarry8(OPER_SUB,op1,6,0) )) );
-    setFlag(FLAG_AF);
+    writeFlag(SPR, FLAG_CF,( old_FLAG_CF || ( checkCarry8(OPER_SUB,op1,6,0) )) );
+    setFlag(SPR, FLAG_AF);
 
-    checkFlags8(OPER_SUB, op1,6,res,FLAG_SF );
-    checkFlags8(OPER_SUB, op1,6,res,FLAG_ZF );
-    checkFlags8(OPER_SUB, op1,6,res,FLAG_PF );
+    checkFlags8(SPR, OPER_SUB, op1,6,res,FLAG_SF );
+    checkFlags8(SPR, OPER_SUB, op1,6,res,FLAG_ZF );
+    checkFlags8(SPR, OPER_SUB, op1,6,res,FLAG_PF );
 
   }//if
   else
-    resetFlag(FLAG_AF);
+    resetFlag(SPR, FLAG_AF);
 
   if ((old_AL > 0x99) || (old_FLAG_CF == 1)){
     tempAL = GR[AL];
@@ -5706,14 +5795,14 @@ void ac_behavior( das ){
     tempAL = tempAL - 0x60;
     res = tempAL;
     GR[AL] = tempAL;
-    setFlag(FLAG_CF);
+    setFlag(SPR, FLAG_CF);
 
-    checkFlags8(OPER_SUB, op1,0x60,res,FLAG_SF );
-    checkFlags8(OPER_SUB, op1,0x60,res,FLAG_ZF );
-    checkFlags8(OPER_SUB, op1,0x60,res,FLAG_PF );
+    checkFlags8(SPR, OPER_SUB, op1,0x60,res,FLAG_SF );
+    checkFlags8(SPR, OPER_SUB, op1,0x60,res,FLAG_ZF );
+    checkFlags8(SPR, OPER_SUB, op1,0x60,res,FLAG_PF );
   }//if
   else
-    resetFlag(FLAG_CF);
+    resetFlag(SPR, FLAG_CF);
 
 
 

@@ -22,6 +22,7 @@
  *
  */
 
+
 #include "IA32.H"
 
 
@@ -92,6 +93,8 @@
 
 #define REG_XH 0xFFFF00FF
 
+using namespace IA32_parms;
+
 int OperSize;
 
 
@@ -106,7 +109,7 @@ ac_word IA32::reg_read ( int reg )
   signed char aux = 0;
   uint GR_temp = 0;
 
-  printf("reg_read %i 0x%08X\n",reg,GR[reg]);
+  printf("reg_read %i 0x%08X\n",reg,GR.read(reg));
   if ( (reg >= 0) && (reg < GENREGS) ){
     /*    if (reg == 0){    
       GR_temp = GR[0];//eax
@@ -122,7 +125,7 @@ ac_word IA32::reg_read ( int reg )
       printf("EAX: 0x%08X\n",GR_temp);
       return GR_temp;
       }//if*/
-    return GR[reg];
+    return GR.read(reg);
   }
   else if ( (reg >= GENREGS) && (reg < (GENREGS+SPRREGS)) )
     return SPR.read(1-(reg-(GENREGS)));
@@ -136,7 +139,7 @@ void IA32::reg_write( int reg, ac_word value )
   printf("reg_write\n");
   if ( (reg >= 0) && (reg < GENREGS) )
     //GR.write(reg, value);
-    GR[reg] =  value;
+    GR.write(reg, value);
   else if ( (reg >= GENREGS) && (reg < (GENREGS+SPRREGS)) )
     SPR.write((1-(reg-GENREGS)), value);
   else if ( (reg >= (GENREGS+SPRREGS)) && (reg < (GENREGS+SEGREGS+SPRREGS)) )
@@ -145,11 +148,13 @@ void IA32::reg_write( int reg, ac_word value )
 
 unsigned char IA32::mem_read ( unsigned int address )
 {
-  return ac_resources::IM->read_byte(address);
+  //return ac_resources::IM->read_byte(address);
+  return IM->read_byte(address);
 }
 
 void IA32::mem_write ( unsigned int address, unsigned char byte )
 {
-  ac_resources::IM->write_byte(address,byte);
+  //ac_resources::IM->write_byte(address,byte);
+  IM->write_byte(address,byte);
 }
 

@@ -1,6 +1,7 @@
 /**
- * @file      ia32.ac
+ * @file      IA32.ac
  * @author    Rodolfo Jardim de Azevedo
+ *            Valdiney Alves Pimenta
  *            Team 03 - MC723 - 2005, 1st period
  *              Eduardo Uemura Okada
  *              Andre Deiano Pansani
@@ -51,8 +52,8 @@ AC_ARCH(IA32)
 
 	ARCH_CTOR(IA32)
 	{
+		ac_isa("IA32_isa.ac");
 		set_endian("little");
-		ac_isa("ia32_isa.ac");
 	};
 };
 

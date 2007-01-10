@@ -1,6 +1,7 @@
 /**
- * @file      ia32_isa.ac
+ * @file      IA32_isa.ac
  * @author    Rodolfo Jardim de Azevedo
+ *            Valdiney Alves Pimenta (ArchC 2.0 port, new instructions, some fixed bugs)
  *            Team 03 - MC723 - 2005, 1st period
  *              Eduardo Uemura Okada
  *              Andre Deiano Pansani
@@ -10,6 +11,7 @@
  *              writeRegister8();
  *              void ac_behavior( Type_op1bi )
  *              DataManager
+ *            
  *
  *            The ArchC Team
  *            http://www.archc.org/
@@ -116,7 +118,7 @@ AC_ISA(IA32)
 
   ac_instr<Type_op1bi8>	mov_AL_imm8, mov_CL_imm8, mov_DL_imm8, mov_BL_imm8,
 			mov_AH_imm8, mov_CH_imm8, mov_DH_imm8, mov_BH_imm8,
-			push_imm8;
+			push_imm8, cmp_AL_imm8;
 
   ac_instr<Type_op1b_rm32>      lds_r32_m16_32, les_r32_m16_32, lea_r32_m, mov_rm32_r32,
                                 mov_r32_rm32, mov_rm32_imm32, /*xchg_EAX_r32, xchg_ECX_r32,
@@ -142,14 +144,15 @@ AC_ISA(IA32)
 				or_rm32_imm32, or_rm32_imm8, xor_rm32_imm32,
 				xor_rm32_imm8, div_rm32, idiv_rm32, imul_rm32,
 				neg_rm32, not_rm32, test_rm32_imm32,
-				sal_shl_rm32, sal_shl_rm32_imm8, sar_rm32,
-				sar_rm32_imm8, shr_rm32, shr_rm32_imm8, rcl_rm32,
+				sal_shl_1_rm32, sal_shl_cl_rm32, sal_shl_rm32_imm8,
+                                sar_1_rm32, sar_cl_rm32,
+				sar_rm32_imm8, shr_1_rm32, shr_cl_rm32, shr_rm32_imm8, rcl_rm32,
 				rcl_rm32_imm8, rcr_rm32, rcr_rm32_imm8, rol_rm32,
 				rol_rm32_imm8, ror_rm32, ror_rm32_imm8, mov_rm8_imm8,
 				mov_r8_rm8, add_r8_rm8, mov_rm8_r8, inc_rm8,
 				add_rm8_imm8, add_rm8_r8, sub_rm8_r8, dec_rm8, sub_rm8_imm8,
 				imul_rm8, mul_rm8, sal_rm8, sar_rm8, sar_rm8_imm8, cmp_rm8_imm8,
-				shr_rm8_imm8, div_rm8, shr_rm8, cmp_AL_imm8, and_r8_rm8,
+				shr_rm8_imm8, div_rm8, shr_rm8, and_r8_rm8,
 				or_r8_rm8, xor_r8_rm8, sal_rm8_imm8, cmp_r8_rm8;
 
   // Debug instructions, nonexistant in the instruction set
@@ -827,16 +830,22 @@ AC_ISA(IA32)
     xor_r32_rm32.set_decoder ( op1b = 0x33 );
 
     // Expansao
-    sal_shl_rm32.set_asm ( "SAL/SHL" );
-    sal_shl_rm32.set_decoder ( op1b = 0xD1, regop = 0x04 );
+    sal_shl_1_rm32.set_asm ( "SAL/SHL" );
+    sal_shl_1_rm32.set_decoder ( op1b = 0xD1, regop = 0x04 );
+    sal_shl_cl_rm32.set_asm ( "SAL SHL" );
+    sal_shl_cl_rm32.set_decoder ( op1b = 0xD3, regop = 0x04 );
     sal_shl_rm32_imm8.set_asm ( "SAL/SHL" );
     sal_shl_rm32_imm8.set_decoder ( op1b = 0xC1, regop = 0x04 );
-    sar_rm32.set_asm ( "SAR" );
-    sar_rm32.set_decoder ( op1b = 0xD1, regop = 0x07 );
+    sar_1_rm32.set_asm ( "SAR" );
+    sar_1_rm32.set_decoder ( op1b = 0xD1, regop = 0x07 );
+    sar_cl_rm32.set_asm ( "SAR" );
+    sar_cl_rm32.set_decoder ( op1b = 0xD3, regop = 0x07 );
     sar_rm32_imm8.set_asm ( "SAR" );
     sar_rm32_imm8.set_decoder ( op1b = 0xC1, regop = 0x07 );
-    shr_rm32.set_asm ( "SHR" );
-    shr_rm32.set_decoder ( op1b = 0xD1, regop = 0x05 );
+    shr_1_rm32.set_asm ( "SHR" );
+    shr_1_rm32.set_decoder ( op1b = 0xD1, regop = 0x05 );
+    shr_cl_rm32.set_asm ( "SHR" );
+    shr_cl_rm32.set_decoder ( op1b = 0xD3, regop = 0x05 );
     shr_rm32_imm8.set_asm ( "SHR" );
     shr_rm32_imm8.set_decoder ( op1b = 0xC1, regop = 0x05 );
     rcl_rm32.set_asm ( "RCL" );
